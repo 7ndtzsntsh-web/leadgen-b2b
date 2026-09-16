@@ -26,6 +26,8 @@ export interface Lead {
   score: number;
   website?: string;
   phoneType?: 'MOBILE' | 'LANDLINE' | 'UNKNOWN';
+  isExpansion?: boolean;
+  expansionSource?: string;
 }
 
 export default function Home() {
@@ -116,8 +118,8 @@ export default function Home() {
     const nicho = lead.category || "seu negócio";
     const lang = country === 'us' ? 'en' : (country === 'es' ? 'es' : 'pt');
     
-    // Extraindo cidade a partir do endereço para usar no texto
-    const cidade = lead.address ? lead.address.split(',')[0].split('-')[0].trim() : (city || 'sua região');
+    // Extraindo cidade a partir do endereço para usar no texto (preferindo a fonte de expansão se houver)
+    const cidade = lead.isExpansion && lead.expansionSource ? lead.expansionSource : (lead.address ? lead.address.split(',')[0].split('-')[0].trim() : (city || 'sua região'));
     
     if (lead.siteStatus === 'Sem Site' || lead.siteStatus === 'Erro 404/Inativo') {
       if (lang === 'en') {
@@ -163,13 +165,14 @@ export default function Home() {
 
   const handleExportCSV = () => {
     if (leads.length === 0) return;
-    const headers = ["Nome da Empresa", "Segmento", "Telefone", "Tipo Contato", "E-mail", "Endereço", "Status do Site", "URL Atual", "Avaliação Google", "Score"];
+    const headers = ["Nome da Empresa", "Segmento", "Origem", "Telefone", "Tipo Contato", "E-mail", "Endereço", "Status do Site", "URL Atual", "Avaliação Google", "Score"];
     const csvContent = [
       headers.join(";"),
       ...leads.map(l => {
         return [
           `"${l.name}"`, 
           `"${l.category}"`, 
+          `"${l.isExpansion ? (l.expansionSource || 'Expansão') : 'Busca Primária'}"`, 
           `"${l.phone}"`, 
           `"${l.phoneType || 'UNKNOWN'}"`, 
           `"${l.email}"`, 
@@ -359,9 +362,16 @@ export default function Home() {
                     </TableRow>
                   ) : (
                     leads.map((lead) => (
-                      <TableRow key={lead.id} className="border-white/10 hover:bg-white/5 transition-colors group">
+                      <TableRow key={lead.id} className={`border-white/10 hover:bg-white/5 transition-colors group ${lead.isExpansion ? 'bg-indigo-900/10' : ''}`}>
                         <TableCell>
-                          <div className="font-medium text-white group-hover:text-primary transition-colors">{lead.name}</div>
+                          <div className="font-medium text-white group-hover:text-primary transition-colors flex flex-wrap items-center gap-2">
+                            {lead.name}
+                            {lead.isExpansion && (
+                              <Badge variant="outline" className="bg-indigo-500/10 text-indigo-400 border-indigo-500/30 text-[9px] px-1 uppercase whitespace-nowrap">
+                                🚀 EXPANSÃO: {lead.expansionSource}
+                              </Badge>
+                            )}
+                          </div>
                           <div className="text-[10px] uppercase font-mono tracking-wider text-muted-foreground mt-1 mb-1">{lead.category}</div>
                           
                           <div className="flex items-center gap-2 mt-2">
