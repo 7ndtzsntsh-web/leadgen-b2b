@@ -171,7 +171,7 @@ export default function Home() {
                         defaultValue={[15]} 
                         max={50} min={5} step={5}
                         value={radius}
-                        onValueChange={setRadius}
+                        onValueChange={(val) => setRadius(val as number[])}
                         className="w-full"
                       />
                     </div>
