@@ -97,10 +97,12 @@ export default function Home() {
       }
     };
 
-    sse.onerror = () => {
+    sse.onerror = (err) => {
+      console.error("SSE Error:", err);
       sse.close();
       setLoading(false);
-      setStatusMessage("Connection closed.");
+      setStatusMessage("Erro de conexão com o servidor. Verifique os logs.");
+      alert("A conexão com o servidor falhou ou foi interrompida.");
     };
   };
 
@@ -236,7 +238,7 @@ export default function Home() {
             { icon: Search, label: "Prospecção" },
             { icon: Settings, label: "Configurações" }
           ].map((item, i) => (
-            <button key={i} className="flex items-center gap-4 p-3 rounded-xl hover:bg-white/5 transition-all w-full text-muted-foreground hover:text-white group/btn">
+            <button key={i} onClick={() => { if(item.label !== 'Prospecção') alert(`O módulo ${item.label} está em desenvolvimento.`) }} className="flex items-center gap-4 p-3 rounded-xl hover:bg-white/5 transition-all w-full text-muted-foreground hover:text-white group/btn">
               <item.icon className="w-5 h-5 flex-shrink-0 group-hover/btn:scale-110 transition-transform" />
               <span className="opacity-0 group-hover:opacity-100 whitespace-nowrap transition-opacity duration-300 font-mono text-sm">{item.label}</span>
             </button>
