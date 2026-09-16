@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Search, MapPin, Globe, ShieldAlert, Star, Download, Copy, MessageCircle, ExternalLink, Settings, LayoutDashboard, User } from "lucide-react";
+import { Search, MapPin, Globe, Star, Download, Copy, MessageCircle, Settings, LayoutDashboard } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -23,11 +23,7 @@ export default function Home() {
   const [insecure, setInsecure] = useState(false);
   const [radius, setRadius] = useState([15]);
 
-  useEffect(() => {
-    fetchLeads();
-  }, [category, noSite, insecure]);
-
-  const fetchLeads = async () => {
+  async function fetchLeads() {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -43,7 +39,12 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  };
+  }
+
+  useEffect(() => {
+    fetchLeads();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, noSite, insecure]);
 
   const getSiteStatusColor = (status: string) => {
     switch (status) {

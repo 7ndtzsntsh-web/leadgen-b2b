@@ -55,7 +55,7 @@ export async function validateDomain(domain: string): Promise<DomainStatus> {
     }
 
     return 'Erro 404/Inativo';
-  } catch (error) {
+  } catch {
     return 'Erro 404/Inativo';
   }
 }

@@ -85,7 +85,6 @@ export async function GET(request: Request) {
   const category = searchParams.get('category')?.toLowerCase();
   const noSite = searchParams.get('noSite') === 'true';
   const insecure = searchParams.get('insecure') === 'true';
-  const badMobile = searchParams.get('badMobile') === 'true'; // Mock for now
 
   let filtered = [...mockLeads];
 
