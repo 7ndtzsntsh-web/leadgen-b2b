@@ -13,7 +13,7 @@ async function extractEmail(url: string): Promise<string> {
     
     const res = await fetch(target, { 
       signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LeadGenBot/4.0)' }
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LeadGenBot/5.0)' }
     });
     clearTimeout(timeoutId);
 
@@ -36,15 +36,13 @@ function getPhoneType(phone: string, country: string): 'MOBILE' | 'LANDLINE' | '
   if (country === 'br') {
     if (digits.length === 11 && digits[2] === '9') return 'MOBILE';
     if (digits.length >= 10 && digits.length <= 11) return 'LANDLINE';
-  } else if (country === 'us') {
-    return 'UNKNOWN';
   }
   return 'UNKNOWN';
 }
 
 function getCityZones(cityStr: string, country: string): string[] {
-  if (country === 'us') return [`${cityStr}`, `${cityStr} Downtown`, `${cityStr} North`, `${cityStr} South`, `${cityStr} East`, `${cityStr} West`];
-  if (country === 'es' || country === 'mx') return [`${cityStr}`, `${cityStr} Centro`, `${cityStr} Norte`, `${cityStr} Sur`, `${cityStr} Este`, `${cityStr} Oeste`];
+  if (country === 'us') return [`${cityStr}`, `${cityStr} Downtown`, `${cityStr} North`, `${cityStr} South`];
+  if (country === 'es' || country === 'mx') return [`${cityStr}`, `${cityStr} Centro`, `${cityStr} Norte`, `${cityStr} Sur`];
   return [`${cityStr}`, `${cityStr} Centro`, `${cityStr} Norte`, `${cityStr} Sul`, `${cityStr} Leste`, `${cityStr} Oeste`];
 }
 
@@ -58,42 +56,30 @@ export async function GET(req: NextRequest) {
   if (!term) return new Response('Parâmetro category é obrigatório', { status: 400 });
 
   const termsToSearch = expandSearchTerm(term, country);
-  const city = expandCity(rawCity);
+  const canonicalCity = expandCity(rawCity);
   
-  // Criação dos Tiers (Camadas de Busca)
-  // Tier 1: A cidade principal subdividida (Grid) ou País inteiro
-  // Tier 2...: Cidades de expansão (Metropolitana)
-  const tiers: { name: string; isExpansion: boolean; queries: string[] }[] = [];
-
-  if (city) {
-    tiers.push({
-      name: city,
+  // Fila Dinâmica de Cidades
+  const locationQueue: { city: string; isExpansion: boolean; queries: string[] }[] = [];
+  
+  if (canonicalCity) {
+    locationQueue.push({
+      city: canonicalCity,
       isExpansion: false,
-      queries: getCityZones(city, country)
+      queries: getCityZones(canonicalCity, country)
     });
     
-    // Auto-Expansão Geográfica (Bairros adjacentes / Região metropolitana)
-    const expansions = getExpansionCities(city);
-    for (const expCity of expansions) {
-      tiers.push({
-        name: expCity,
+    const expansions = getExpansionCities(canonicalCity);
+    for (const exp of expansions) {
+      locationQueue.push({
+        city: exp,
         isExpansion: true,
-        queries: getCityZones(expCity, country).slice(0, 3) // Limita a 3 zonas nas cidades vizinhas para ser mais rápido
-      });
-    }
-
-    if (expansions.length === 0) {
-      // Expansão genérica (Estado)
-      tiers.push({
-        name: `Estado/Região de ${city}`,
-        isExpansion: true,
-        queries: [`Região de ${city}`, `Estado de ${city}`]
+        queries: getCityZones(exp, country).slice(0, 3) // Foca nos centros/norte/sul das vizinhas
       });
     }
   } else {
     const countryNames: Record<string, string> = { 'br': 'Brasil', 'pt': 'Portugal', 'us': 'United States', 'es': 'España' };
-    tiers.push({
-      name: countryNames[country] || 'Brasil',
+    locationQueue.push({
+      city: countryNames[country] || 'Brasil',
       isExpansion: false,
       queries: [countryNames[country] || 'Brasil']
     });
@@ -105,33 +91,36 @@ export async function GET(req: NextRequest) {
         try { controller.enqueue(`data: ${JSON.stringify(data)}\n\n`); } catch (e) {}
       };
 
-      sendEvent({ type: 'info', message: `Iniciando mineração profunda de ${termsToSearch[0]}... (Meta: ${volume} leads)` });
+      sendEvent({ type: 'info', message: `Meta de ${volume} leads ativada para ${termsToSearch[0]}...` });
 
       const seenIds = new Set();
       const seenPhones = new Set();
       let totalValidStreamed = 0;
 
       try {
-        for (const tier of tiers) {
-          if (totalValidStreamed >= volume) break;
-
-          if (tier.isExpansion) {
-            sendEvent({ type: 'info', message: `⚠️ Cota não atingida. Ativando AUTO-EXPANSÃO para: ${tier.name}...` });
+        // LOOP ESTRITO DE CUMPRIMENTO DA META
+        while (totalValidStreamed < volume && locationQueue.length > 0) {
+          const currentLoc = locationQueue.shift()!;
+          
+          if (currentLoc.isExpansion) {
+            sendEvent({ type: 'info', message: `⚠️ Meta não atingida. Ativando AUTO-EXPANSÃO (Polo Comercial): ${currentLoc.city}...` });
+          } else {
+            sendEvent({ type: 'info', message: `Varrendo polo primário: ${currentLoc.city}...` });
           }
 
           let rawResults: any[] = [];
           const needed = volume - totalValidStreamed;
 
-          // Etapa 1: Coletar leads crus (Google ou OSM)
+          // Etapa 1: Coletar batch de leads brutos desta cidade (pega a mais para suprir descartes)
           if (GOOGLE_API_KEY) {
-            for (const loc of tier.queries) {
-              if (rawResults.length >= needed * 2) break; // Fetch extra to account for filtering
-              const query = `${termsToSearch.slice(0, 3).join(' OR ')} in ${loc}`;
+            for (const qZone of currentLoc.queries) {
+              if (rawResults.length >= needed * 3) break; // Buscamos bastante para cobrir descartes rigorosos
+              const query = `${termsToSearch.slice(0, 3).join(' OR ')} in ${qZone}`;
               
               let nextPageToken = undefined;
               let pagesFetched = 0;
 
-              while (rawResults.length < needed * 2 && pagesFetched < 3) {
+              while (rawResults.length < needed * 3 && pagesFetched < 4) {
                 const gRes: Response = await fetch('https://places.googleapis.com/v1/places:searchText', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_API_KEY, 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,places.primaryType,nextPageToken' },
@@ -153,32 +142,32 @@ export async function GET(req: NextRequest) {
                         name: p.displayName?.text || 'Desconhecido',
                         category: (p.primaryType || term).replace(/_/g, ' '),
                         phone: phone,
-                        address: p.formattedAddress || loc,
+                        address: p.formattedAddress || qZone,
                         rating: p.rating || 0,
                         reviewsCount: p.userRatingCount || 0,
                         website: p.websiteUri,
-                        isExpansion: tier.isExpansion,
-                        expansionSource: tier.name
+                        isExpansion: currentLoc.isExpansion,
+                        expansionSource: currentLoc.city
                       });
                     }
                   }
                 }
                 nextPageToken = data.nextPageToken;
                 pagesFetched++;
-                sendEvent({ type: 'info', message: `[${tier.name}] Mapeando locais... (${rawResults.length})` });
-                if (!nextPageToken || rawResults.length >= needed * 2) break;
-                await new Promise(r => setTimeout(r, 2000));
+                if (!nextPageToken) break;
+                await new Promise(r => setTimeout(r, 1500));
               }
             }
           } else {
-            const limitPerTerm = Math.ceil((needed * 2) / (termsToSearch.length * tier.queries.length));
-            for (const loc of tier.queries) {
-              if (rawResults.length >= needed * 2) break;
+            // NOMINATIM FALLBACK
+            const limitPerTerm = Math.ceil((needed * 3) / (termsToSearch.length * currentLoc.queries.length));
+            for (const qZone of currentLoc.queries) {
+              if (rawResults.length >= needed * 3) break;
               for (const t of termsToSearch.slice(0, 3)) {
-                if (rawResults.length >= needed * 2) break;
-                const q = `${t} ${loc}`.trim();
+                if (rawResults.length >= needed * 3) break;
+                const q = `${t} ${qZone}`.trim();
                 const nomRes: Response = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&extratags=1&limit=${Math.max(10, limitPerTerm)}`, {
-                  headers: { 'User-Agent': 'LeadGenPro-B2B-App/4.0' }
+                  headers: { 'User-Agent': 'LeadGenPro-B2B-App/5.0' }
                 });
 
                 if (nomRes.ok) {
@@ -186,37 +175,39 @@ export async function GET(req: NextRequest) {
                   for (const p of data) {
                     const tags = p.extratags || {};
                     const phone = tags.phone || tags['contact:phone'] || tags['contact:whatsapp'] || 'Não informado';
-                    const pName = p.name || tags.brand || 'Estabelecimento Local';
-                    
                     if (!seenIds.has(p.osm_id) && !(phone !== 'Não informado' && seenPhones.has(phone))) {
                       seenIds.add(p.osm_id);
                       if (phone !== 'Não informado') seenPhones.add(phone);
-                      
                       rawResults.push({
                         id: p.osm_id.toString(),
-                        name: pName,
+                        name: p.name || tags.brand || 'Estabelecimento Local',
                         category: (p.type || term).replace(/_/g, ' '),
                         phone: phone,
                         address: p.display_name,
                         rating: (3.5 + Math.random() * 1.5).toFixed(1),
                         reviewsCount: Math.floor(Math.random() * 200) + 5,
                         website: tags.website || tags['contact:website'] || tags.url,
-                        isExpansion: tier.isExpansion,
-                        expansionSource: tier.name
+                        isExpansion: currentLoc.isExpansion,
+                        expansionSource: currentLoc.city
                       });
                     }
                   }
                 }
-                sendEvent({ type: 'info', message: `[${tier.name}] Mapeando locais... (${rawResults.length})` });
-                await new Promise(r => setTimeout(r, 1200));
+                await new Promise(r => setTimeout(r, 1000));
               }
             }
           }
 
           rawResults = rawResults.filter(l => l.name !== 'Estabelecimento Local');
-          sendEvent({ type: 'info', message: `Validando contatos da camada ${tier.name}...` });
+          
+          // Ordena crus priorizando os mais aquecidos (com mais avaliações) para tentar validar primeiro os melhores
+          rawResults.sort((a, b) => b.reviewsCount - a.reviewsCount);
 
-          // Etapa 2: Enriquecimento, Filtragem Rígida e Streaming Lote por Lote
+          if (rawResults.length > 0) {
+            sendEvent({ type: 'info', message: `Analisando contatos e sites de ${rawResults.length} locais em ${currentLoc.city}...` });
+          }
+
+          // Etapa 2: Validar contatos e Streaming (DESCARTANDO OS INÚTEIS)
           const batchSize = 5; 
           for (let i = 0; i < rawResults.length; i += batchSize) {
             if (totalValidStreamed >= volume) break;
@@ -224,7 +215,8 @@ export async function GET(req: NextRequest) {
             const batch = rawResults.slice(i, i + batchSize);
             
             await Promise.all(batch.map(async (rawLead) => {
-              if (totalValidStreamed >= volume) return;
+              // Previne race conditions se o batch estourar o volume simultaneamente
+              if (totalValidStreamed >= volume) return; 
 
               let siteStatus: DomainStatus | 'Sem Site' = 'Sem Site';
               let email = 'N/D';
@@ -236,10 +228,14 @@ export async function GET(req: NextRequest) {
                 }
               }
 
-              // FILTRO EXTREMO: ZERO LEADS INÚTEIS
-              if (rawLead.phone === 'Não informado' && email === 'N/D') return;
+              // REGRA DE OURO: ZERO LEADS INÚTEIS
+              // Se não tem telefone NEM e-mail, é descartado silenciosamente e não contabiliza na meta.
+              if (rawLead.phone === 'Não informado' && email === 'N/D') {
+                return;
+              }
 
               const phoneType = getPhoneType(rawLead.phone, country);
+              
               let score = 0;
               if (siteStatus === 'Sem Site') score += 50;
               if (siteStatus === 'HTTP Inseguro') score += 40;
@@ -248,6 +244,7 @@ export async function GET(req: NextRequest) {
               if (rawLead.phone !== 'Não informado') score += 10;
               if (email !== 'N/D') score += 10;
               if (phoneType === 'MOBILE') score += 5;
+              if (rawLead.reviewsCount > 100) score += 10; // Bônus pra volume alto de clientes
 
               totalValidStreamed++;
               sendEvent({ 
@@ -262,14 +259,14 @@ export async function GET(req: NextRequest) {
               });
             }));
           }
-          
-          if (totalValidStreamed < volume && tiers.indexOf(tier) < tiers.length - 1) {
-            sendEvent({ type: 'info', message: `Pausa tática antes da próxima expansão...` });
-            await new Promise(r => setTimeout(r, 2000));
-          }
+        } // Fim do Loop Estrito
+
+        if (totalValidStreamed >= volume) {
+          sendEvent({ type: 'done', message: `🎯 Meta alcançada! ${totalValidStreamed} leads perfeitos capturados.` });
+        } else {
+          sendEvent({ type: 'done', message: `Varredura esgotada. Capturamos ${totalValidStreamed} leads qualificados no raio máximo.` });
         }
 
-        sendEvent({ type: 'done', message: `Missão cumprida! ${totalValidStreamed} leads perfeitos capturados.` });
       } catch (error) {
         console.error('SSE Error:', error);
         sendEvent({ type: 'error', message: 'Ocorreu um erro na mineração.' });
