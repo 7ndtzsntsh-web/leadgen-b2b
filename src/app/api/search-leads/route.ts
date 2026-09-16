@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { expandSearchTerm, expandCity, getExpansionCities } from '@/lib/semanticDictionary';
+import { expandSearchTerm, expandCity, getExpansionCities, getValidDDDs } from '@/lib/semanticDictionary';
 import { validateDomain, DomainStatus } from '@/lib/domainValidator';
 
 const GOOGLE_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
@@ -40,7 +40,7 @@ async function extractEmail(url: string): Promise<string> {
   }
 }
 
-function cleanPhone(phone: string, country: string): string {
+function cleanPhone(phone: string, country: string, currentLocCity: string): string {
   if (!phone || phone === 'Não informado') return 'Não informado';
   const digits = phone.replace(/\D/g, '');
   
@@ -51,6 +51,12 @@ function cleanPhone(phone: string, country: string): string {
     // DDD (2) + Fixo (8) = 10 ou DDD (2) + Celular (9) = 11. Remove código de país se houver.
     const brDigits = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits;
     if (brDigits.length >= 10 && brDigits.length <= 11) {
+      // Validação Estrita de DDD Geográfico
+      const extractedDDD = brDigits.slice(0, 2);
+      const validDDDs = getValidDDDs(currentLocCity);
+      if (validDDDs && !validDDDs.includes(extractedDDD)) {
+        return 'Não informado'; // DDD não condiz com a cidade mapeada!
+      }
       return phone; // Válido
     }
     return 'Não informado';
@@ -165,7 +171,7 @@ export async function GET(req: NextRequest) {
                 if (data.places) {
                   for (const p of data.places) {
                     const rawPhone = p.nationalPhoneNumber || 'Não informado';
-                    const phone = cleanPhone(rawPhone, country);
+                    const phone = cleanPhone(rawPhone, country, currentLoc.city);
                     
                     if (!seenIds.has(p.id) && !(phone !== 'Não informado' && seenPhones.has(phone))) {
                       seenIds.add(p.id);
@@ -209,7 +215,7 @@ export async function GET(req: NextRequest) {
                   for (const p of data) {
                     const tags = p.extratags || {};
                     const rawPhone = tags.phone || tags['contact:phone'] || tags['contact:whatsapp'] || 'Não informado';
-                    const phone = cleanPhone(rawPhone, country);
+                    const phone = cleanPhone(rawPhone, country, currentLoc.city);
                     
                     if (!seenIds.has(p.osm_id) && !(phone !== 'Não informado' && seenPhones.has(phone))) {
                       seenIds.add(p.osm_id);

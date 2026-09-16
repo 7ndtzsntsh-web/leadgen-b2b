@@ -44,6 +44,38 @@ export function expandCity(cityInput: string): string {
   return cityAliases[normalized] || cityInput;
 }
 
+// Mapeamento de DDDs válidos por estado/cidade para blindar dados geográficos no Brasil
+const dddMap: Record<string, string[]> = {
+  "são paulo": ["11", "12", "13", "14", "15", "16", "17", "18", "19"],
+  "guarulhos": ["11"], "campinas": ["19"], "osasco": ["11"], "santo andré": ["11"], "são bernardo do campo": ["11"], "sorocaba": ["15"],
+  "rio de janeiro": ["21", "22", "24"], "niterói": ["21"],
+  "florianópolis": ["48"], "são josé": ["48"], "palhoça": ["48"], "balneário camboriú": ["47"], "blumenau": ["47"], "joinville": ["47"], "criciúma": ["48"], "santa catarina": ["47", "48", "49"],
+  "belo horizonte": ["31"], "minas gerais": ["31", "32", "33", "34", "35", "37", "38"],
+  "curitiba": ["41"], "paraná": ["41", "42", "43", "44", "45", "46"],
+  "brasília": ["61"], "goiânia": ["62"], "goiás": ["61", "62", "64"],
+  "porto alegre": ["51"], "rio grande do sul": ["51", "53", "54", "55"],
+  "salvador": ["71"], "bahia": ["71", "73", "74", "75", "77"],
+  "recife": ["81"], "pernambuco": ["81", "87"],
+  "fortaleza": ["85"], "ceará": ["85", "88"]
+};
+
+export function getValidDDDs(cityInput: string): string[] | null {
+  const normalized = cityInput.toLowerCase().trim();
+  
+  // Tenta achar direto pelo nome da cidade ou estado
+  if (dddMap[normalized]) return dddMap[normalized];
+  
+  // Tenta achar se o nome mapeado contém a palavra (ex: buscar "São Paulo" dentro da chave)
+  for (const [key, ddds] of Object.entries(dddMap)) {
+    if (normalized.includes(key) || key.includes(normalized)) {
+      return ddds;
+    }
+  }
+  
+  // Se não tem regra mapeada para a cidade, retorna null para ignorar a trava e ser flexível
+  return null;
+}
+
 export function getExpansionCities(canonicalCity: string): string[] {
   // Retorna os polos vizinhos em ordem de relevância comercial
   return expansionMap[canonicalCity] || [

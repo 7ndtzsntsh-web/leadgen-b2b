@@ -225,7 +225,15 @@ export default function Home() {
           
           <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-black/20 p-6 rounded-3xl border border-white/5 backdrop-blur-sm shadow-xl">
             <div className="flex items-center gap-4">
-              <img src="/logo.png" alt="Vanguard Web Studio" className="w-12 h-12 md:w-16 md:h-16 object-contain rounded-xl shadow-lg border border-white/10" />
+              <img 
+                src="/logo.png" 
+                alt="Vanguard Web Studio" 
+                className="h-10 w-auto md:h-16 object-contain rounded-xl shadow-lg border border-white/10"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  console.error("Arquivo /logo.png não encontrado na pasta public/");
+                }}
+              />
               <div>
                 <h1 className="font-serif italic font-light text-3xl md:text-4xl text-white tracking-wide">
                   LeadHunter <span className="text-primary not-italic font-sans font-semibold tracking-tighter">B2B</span>
