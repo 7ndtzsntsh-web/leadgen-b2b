@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Search, MapPin, Globe, Star, Download, Copy, MessageCircle, Settings, LayoutDashboard, FileText, Play, Phone } from "lucide-react";
+import { Search, MapPin, Globe, Star, Download, Copy, MessageCircle, Settings, LayoutDashboard, FileText, Play, Phone, CheckCircle2 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -165,15 +165,39 @@ export default function Home() {
 
   const handleExportCSV = () => {
     if (leads.length === 0) return;
-    const headers = ["Nome da Empresa", "Segmento", "Origem", "Telefone", "Tipo Contato", "E-mail", "Endereço", "Status do Site", "URL Atual", "Avaliação Google", "Score"];
+    const headers = [
+      "Nome", 
+      "Segmento", 
+      "Origem (Expansão)", 
+      "DDD", 
+      "Telefone (Fixo/WPP)", 
+      "Tipo Tel", 
+      "E-mail Confirmado", 
+      "Endereço Completo", 
+      "Status do Site", 
+      "URL", 
+      "Avaliação Google",
+      "Score"
+    ];
+
     const csvContent = [
       headers.join(";"),
       ...leads.map(l => {
+        let ddd = "";
+        let phoneStr = l.phone;
+        const digits = l.phone.replace(/\D/g, '');
+        if (digits.length >= 10 && (digits.startsWith("55") ? digits.length >= 12 : true)) {
+          const brDigits = digits.startsWith("55") ? digits.slice(2) : digits;
+          ddd = brDigits.slice(0, 2);
+          phoneStr = brDigits.slice(2);
+        }
+        
         return [
           `"${l.name}"`, 
           `"${l.category}"`, 
           `"${l.isExpansion ? (l.expansionSource || 'Expansão') : 'Busca Primária'}"`, 
-          `"${l.phone}"`, 
+          `"${ddd}"`, 
+          `"${phoneStr}"`, 
           `"${l.phoneType || 'UNKNOWN'}"`, 
           `"${l.email}"`, 
           `"${l.address}"`, 
@@ -386,6 +410,9 @@ export default function Home() {
                         <TableCell>
                           <div className="font-medium text-white group-hover:text-primary transition-colors flex flex-wrap items-center gap-2">
                             {lead.name}
+                            <Badge variant="outline" className="bg-green-500/10 text-green-400 border-green-500/30 text-[9px] px-1 uppercase whitespace-nowrap flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" /> VERIFICADO
+                            </Badge>
                             {lead.isExpansion && (
                               <Badge variant="outline" className="bg-indigo-500/10 text-indigo-400 border-indigo-500/30 text-[9px] px-1 uppercase whitespace-nowrap">
                                 🚀 EXPANSÃO: {lead.expansionSource}
