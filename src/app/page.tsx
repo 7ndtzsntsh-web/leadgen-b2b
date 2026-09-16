@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Search, MapPin, Globe, Star, Download, Copy, MessageCircle, Settings, LayoutDashboard } from "lucide-react";
+import { Search, MapPin, Globe, Star, Download, Copy, MessageCircle, Settings, LayoutDashboard, FileText } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,40 +11,40 @@ import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Lead } from "./api/leads/route";
+import { Lead } from "./api/search-leads/route";
 
 export default function Home() {
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
 
   // Filtros
   const [category, setCategory] = useState("");
+  const [city, setCity] = useState("São Paulo");
   const [noSite, setNoSite] = useState(false);
   const [insecure, setInsecure] = useState(false);
   const [radius, setRadius] = useState([15]);
 
   async function fetchLeads() {
+    if (!category.trim() || !city.trim()) return;
     setLoading(true);
+    setHasSearched(true);
     try {
       const params = new URLSearchParams();
-      if (category) params.append("category", category);
+      params.append("category", category);
+      params.append("city", city);
       if (noSite) params.append("noSite", "true");
       if (insecure) params.append("insecure", "true");
 
-      const res = await fetch(`/api/leads?${params.toString()}`);
+      const res = await fetch(`/api/search-leads?${params.toString()}`);
       const data = await res.json();
-      setLeads(data.data);
+      setLeads(data.data || []);
     } catch (error) {
       console.error("Erro ao buscar leads:", error);
     } finally {
       setLoading(false);
     }
   }
-
-  useEffect(() => {
-    fetchLeads();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, noSite, insecure]);
 
   const getSiteStatusColor = (status: string) => {
     switch (status) {
@@ -56,21 +56,36 @@ export default function Home() {
     }
   };
 
-  const generateWhatsAppLink = (lead: Lead) => {
-    let message = `Olá, equipe da ${lead.name}. Tudo bem?\nEncontrei vocês aqui no Google e vi que `;
-    if (lead.siteStatus === 'Sem Site') {
-      message += `ainda não possuem um site profissional.`;
-    } else if (lead.siteStatus === 'HTTP Inseguro') {
-      message += `o site de vocês (${lead.website}) está marcando como 'Não Seguro' para os visitantes.`;
+  const generatePASCopy = (lead: Lead) => {
+    const nicho = lead.category || "o seu negócio";
+    const cidade = lead.address ? lead.address.split(',')[0].split('-')[0].trim() : city;
+    
+    if (lead.siteStatus === 'Sem Site' || lead.siteStatus === 'Erro 404/Inativo') {
+      return `Olá, responsável da ${lead.name}! Tudo bem?\n\nEstava buscando serviços de ${nicho} em ${cidade} e vi que vocês têm excelentes avaliações no Google, mas percebi que ainda não possuem um site próprio oficial e profissional.\n\nHoje, a grande maioria dos clientes que pesquisa no celular acaba fechando com concorrentes locais simplesmente porque clicam no link do portfólio/serviços direto no Google Maps. Vocês estão perdendo faturamento e clientes novos todos os dias por não terem essa vitrine digital estruturada.\n\nNós criamos uma prévia de como ficaria a presença digital de vocês focada 100% em conversão direta para esse WhatsApp. Posso te enviar em 2 minutinhos para você avaliar sem compromisso?`;
     } else {
-      message += `a presença digital de vocês tem grande potencial de melhoria.`;
+      return `Olá, responsável da ${lead.name}! Tudo bem?\n\nEncontrei a empresa de vocês no Google Maps e tentei acessar o site, mas o navegador bloqueou alertando "Não Seguro" (sem certificado de segurança HTTPS atualizado).\n\nIsso faz muitos clientes desistirem da compra ou contato imediato por medo de vírus ou golpe, além de derrubar o posicionamento de vocês nas buscas de ${cidade}. Estão literalmente entregando clientes para a concorrência.\n\nIdentifiquei exatamente como corrigir isso e modernizar o carregamento do site. Quer que eu te mande um resumo prático do que precisa ser ajustado?`;
     }
-    return `https://wa.me/${lead.phone}?text=${encodeURIComponent(message)}`;
+  };
+
+  const handleCopyMessage = (lead: Lead) => {
+    const msg = generatePASCopy(lead);
+    navigator.clipboard.writeText(msg);
+    alert("Mensagem copiada para a área de transferência!");
+  };
+
+  const handleOpenWhatsApp = (lead: Lead) => {
+    if (lead.phone === 'Não informado') {
+      alert("Este lead não possui telefone cadastrado.");
+      return;
+    }
+    const msg = generatePASCopy(lead);
+    const num = lead.phone.replace(/\D/g, ''); // Limpa formatação
+    window.open(`https://wa.me/55${num}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   const handleExportCSV = () => {
     if (leads.length === 0) return;
-    const headers = ["Nome", "Categoria", "Telefone", "Email", "Status do Site", "Endereço", "Score"];
+    const headers = ["Nome da Empresa", "Nicho", "Telefone", "E-mail", "Endereço", "Status do Site", "URL Atual", "Avaliação Google", "Score de Oportunidade"];
     const csvContent = [
       headers.join(";"),
       ...leads.map(l => [
@@ -78,12 +93,15 @@ export default function Home() {
         `"${l.category}"`, 
         `"${l.phone}"`, 
         `"${l.email}"`, 
-        `"${l.siteStatus}"`, 
         `"${l.address}"`, 
+        `"${l.siteStatus}"`,
+        `"${l.website || ''}"`,
+        l.rating,
         l.score
       ].join(";"))
     ].join("\n");
 
+    // \uFEFF ensures UTF-8 BOM for Excel to read accents correctly
     const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -126,8 +144,8 @@ export default function Home() {
 
           <Card className="backdrop-blur-xl bg-black/40 border border-white/20 rounded-3xl shadow-2xl overflow-hidden">
             <CardHeader className="border-b border-white/10 bg-white/5">
-              <CardTitle className="font-serif italic font-light text-2xl">Filtros de Busca</CardTitle>
-              <CardDescription className="font-mono text-xs">Ajuste os parâmetros para encontrar as melhores oportunidades</CardDescription>
+              <CardTitle className="font-serif italic font-light text-2xl">Mineração Ativa</CardTitle>
+              <CardDescription className="font-mono text-xs">Busca semântica real: digite o nicho e expandiremos automaticamente</CardDescription>
             </CardHeader>
             <CardContent className="p-6">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -138,10 +156,11 @@ export default function Home() {
                     <div className="relative">
                       <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                       <Input 
-                        placeholder="Ex: Odontologia..." 
+                        placeholder="Ex: padaria, clinica, imobiliaria..." 
                         className="pl-9 bg-black/20 border-white/10 text-white placeholder:text-muted-foreground focus-visible:ring-primary/50"
                         value={category}
                         onChange={(e) => setCategory(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && fetchLeads()}
                       />
                     </div>
                   </div>
@@ -159,7 +178,13 @@ export default function Home() {
                           <SelectItem value="pt">Portugal</SelectItem>
                         </SelectContent>
                       </Select>
-                      <Input placeholder="Cidade" className="bg-black/20 border-white/10" />
+                      <Input 
+                        placeholder="Cidade/Bairro" 
+                        value={city}
+                        onChange={(e) => setCity(e.target.value)}
+                        className="bg-black/20 border-white/10" 
+                        onKeyDown={(e) => e.key === 'Enter' && fetchLeads()}
+                      />
                     </div>
                   </div>
                 </div>
@@ -185,7 +210,7 @@ export default function Home() {
                     </div>
                     <div className="flex items-center space-x-2">
                       <Checkbox id="insecure" checked={insecure} onCheckedChange={(c) => setInsecure(c as boolean)} className="border-white/20 data-[state=checked]:bg-primary" />
-                      <label htmlFor="insecure" className="text-sm font-medium leading-none text-gray-300">Apenas sites Inseguros/HTTP</label>
+                      <label htmlFor="insecure" className="text-sm font-medium leading-none text-gray-300">Apenas sites Inseguros / HTTP</label>
                     </div>
                   </div>
                 </div>
@@ -196,12 +221,16 @@ export default function Home() {
                       <Download className="w-4 h-4 mr-2" />
                       Exportar .CSV
                     </Button>
-                    <Button variant="outline" className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white" onClick={() => navigator.clipboard.writeText(leads.map(l => l.email).join(","))}>
+                    <Button variant="outline" className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white" onClick={() => navigator.clipboard.writeText(leads.map(l => l.email).join(","))} title="Copiar Emails">
                       <Copy className="w-4 h-4" />
                     </Button>
                   </div>
-                  <Button className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-12 shadow-[0_0_20px_rgba(var(--primary),0.3)] hover:shadow-[0_0_30px_rgba(var(--primary),0.5)] transition-all">
-                    Buscar Oportunidades
+                  <Button 
+                    className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-12 shadow-[0_0_20px_rgba(var(--primary),0.3)] hover:shadow-[0_0_30px_rgba(var(--primary),0.5)] transition-all"
+                    onClick={fetchLeads}
+                    disabled={loading}
+                  >
+                    {loading ? "Minerando na Web..." : "Buscar Oportunidades"}
                   </Button>
                 </div>
 
@@ -212,53 +241,59 @@ export default function Home() {
           <Card className="backdrop-blur-xl bg-black/40 border border-white/20 rounded-3xl overflow-hidden shadow-2xl">
             <CardHeader className="flex flex-row items-center justify-between border-b border-white/10 bg-white/5">
               <div>
-                <CardTitle className="font-serif italic font-light text-2xl">Resultados</CardTitle>
-                <CardDescription className="font-mono text-xs">{leads.length} leads encontrados</CardDescription>
+                <CardTitle className="font-serif italic font-light text-2xl">Oportunidades Mineradas</CardTitle>
+                <CardDescription className="font-mono text-xs">{leads.length} leads qualificados para conversão</CardDescription>
               </div>
             </CardHeader>
             <CardContent className="p-0">
               <Table>
                 <TableHeader className="bg-white/5">
                   <TableRow className="border-white/10 hover:bg-transparent">
-                    <TableHead className="font-mono text-xs uppercase text-muted-foreground">Empresa</TableHead>
-                    <TableHead className="font-mono text-xs uppercase text-muted-foreground">Contato</TableHead>
-                    <TableHead className="font-mono text-xs uppercase text-muted-foreground">Status / Digital</TableHead>
+                    <TableHead className="font-mono text-xs uppercase text-muted-foreground w-1/3">Empresa</TableHead>
+                    <TableHead className="font-mono text-xs uppercase text-muted-foreground w-1/4">Contato</TableHead>
+                    <TableHead className="font-mono text-xs uppercase text-muted-foreground">Diagnóstico</TableHead>
                     <TableHead className="font-mono text-xs uppercase text-muted-foreground">Score</TableHead>
-                    <TableHead className="text-right font-mono text-xs uppercase text-muted-foreground">Ação</TableHead>
+                    <TableHead className="text-right font-mono text-xs uppercase text-muted-foreground">Pitch de Vendas (PAS)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Buscando leads...</TableCell>
+                      <TableCell colSpan={5} className="text-center py-12 text-muted-foreground font-mono animate-pulse">Varrendo serviços locais de mapas e testando domínios. Isso pode levar alguns segundos...</TableCell>
+                    </TableRow>
+                  ) : !hasSearched ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center py-12 text-muted-foreground font-mono">Preencha um Nicho (Ex: Clínica, Pizzaria) e Cidade e clique em Buscar Oportunidades.</TableCell>
                     </TableRow>
                   ) : leads.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Nenhum lead encontrado com estes filtros.</TableCell>
+                      <TableCell colSpan={5} className="text-center py-12 text-muted-foreground font-mono">Nenhuma oportunidade encontrada com esses critérios precisos.</TableCell>
                     </TableRow>
                   ) : (
                     leads.map((lead) => (
                       <TableRow key={lead.id} className="border-white/10 hover:bg-white/5 transition-colors group">
                         <TableCell>
                           <div className="font-medium text-white group-hover:text-primary transition-colors">{lead.name}</div>
-                          <div className="text-xs text-muted-foreground flex items-center mt-1">
-                            <MapPin className="w-3 h-3 mr-1 opacity-70" />
-                            <span className="truncate max-w-[200px] block" title={lead.address}>{lead.address.split('-')[0]}</span>
+                          <div className="text-[10px] uppercase font-mono tracking-wider text-muted-foreground mt-1 mb-1">{lead.category}</div>
+                          <div className="text-xs text-muted-foreground flex items-center">
+                            <MapPin className="w-3 h-3 mr-1 opacity-70 flex-shrink-0" />
+                            <span className="truncate max-w-[200px] block" title={lead.address}>{lead.address}</span>
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="text-sm font-mono">{lead.phone.replace(/(\d{2})(\d{2})(\d{5})(\d{4})/, '+$1 ($2) $3-$4')}</div>
-                          <div className="text-xs text-muted-foreground">{lead.email}</div>
+                          <div className="text-sm font-mono">{lead.phone}</div>
+                          <div className="text-xs text-muted-foreground truncate max-w-[150px]" title={lead.email}>{lead.email}</div>
+                          {lead.website && <div className="text-xs text-blue-400 truncate max-w-[150px] mt-1 hover:underline cursor-pointer" onClick={() => window.open(lead.website?.startsWith('http') ? lead.website : `http://${lead.website}`, '_blank')}>{lead.website}</div>}
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-col items-start gap-2">
                             <Badge variant="outline" className={`${getSiteStatusColor(lead.siteStatus)} font-mono text-[10px] uppercase`}>
                               {lead.siteStatus}
                             </Badge>
-                            {lead.rating && (
+                            {lead.rating && lead.rating > 0 && (
                               <div className="flex items-center text-xs text-yellow-500 bg-yellow-500/10 px-2 py-0.5 rounded-full border border-yellow-500/20">
                                 <Star className="w-3 h-3 mr-1 fill-current" />
-                                {lead.rating} <span className="text-muted-foreground ml-1">({lead.reviewsCount})</span>
+                                {lead.rating.toFixed(1)} <span className="text-muted-foreground ml-1">({lead.reviewsCount})</span>
                               </div>
                             )}
                           </div>
@@ -275,15 +310,26 @@ export default function Home() {
                           </div>
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button 
-                            variant="default" 
-                            size="sm" 
-                            className="bg-[#25D366]/20 text-[#25D366] border border-[#25D366]/50 hover:bg-[#25D366] hover:text-white transition-all shadow-[0_0_15px_rgba(37,211,102,0.1)] hover:shadow-[0_0_20px_rgba(37,211,102,0.4)]"
-                            onClick={() => window.open(generateWhatsAppLink(lead), '_blank')}
-                          >
-                            <MessageCircle className="w-4 h-4 mr-2" />
-                            Abordar
-                          </Button>
+                          <div className="flex flex-col gap-2 items-end">
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white transition-all text-xs h-8"
+                              onClick={() => handleCopyMessage(lead)}
+                            >
+                              <FileText className="w-3 h-3 mr-2" />
+                              Copiar Copy PAS
+                            </Button>
+                            <Button 
+                              variant="default" 
+                              size="sm" 
+                              className="bg-[#25D366]/20 text-[#25D366] border border-[#25D366]/50 hover:bg-[#25D366] hover:text-white transition-all shadow-[0_0_10px_rgba(37,211,102,0.1)] hover:shadow-[0_0_20px_rgba(37,211,102,0.4)] text-xs h-8"
+                              onClick={() => handleOpenWhatsApp(lead)}
+                            >
+                              <MessageCircle className="w-3 h-3 mr-2" />
+                              Abordar
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))
