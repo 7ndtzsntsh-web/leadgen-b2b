@@ -21,8 +21,8 @@ export const metadata: Metadata = {
   title: "LeadHunter | Prospecção B2B",
   description: "Plataforma avançada de Lead Generation B2B. Encontre empresas sem site, com SSL inválido e oportunidades claras para serviços web de alta conversão.",
   icons: {
-    icon: '/logo.png',
-    shortcut: '/logo.png',
+    icon: '/favicon.ico',
+    shortcut: '/favicon.ico',
     apple: '/logo.png',
   },
   alternates: {
