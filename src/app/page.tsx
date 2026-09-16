@@ -228,7 +228,7 @@ export default function Home() {
               <img src="/logo.png" alt="Vanguard Web Studio" className="w-12 h-12 md:w-16 md:h-16 object-contain rounded-xl shadow-lg border border-white/10" />
               <div>
                 <h1 className="font-serif italic font-light text-3xl md:text-4xl text-white tracking-wide">
-                  Lead Generation <span className="text-primary not-italic font-sans font-semibold tracking-tighter">Pro</span>
+                  LeadHunter <span className="text-primary not-italic font-sans font-semibold tracking-tighter">B2B</span>
                 </h1>
                 <p className="font-mono text-muted-foreground text-sm mt-1">{t.title}</p>
               </div>

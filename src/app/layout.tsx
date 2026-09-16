@@ -18,29 +18,34 @@ const robotoMono = Roboto_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "LeadGen Pro | Prospecção Ativa B2B e Vendas",
+  title: "LeadHunter | Prospecção B2B",
   description: "Plataforma avançada de Lead Generation B2B. Encontre empresas sem site, com SSL inválido e oportunidades claras para serviços web de alta conversão.",
+  icons: {
+    icon: '/logo.png',
+    shortcut: '/logo.png',
+    apple: '/logo.png',
+  },
   alternates: {
     canonical: "https://leadgen-b2b.vercel.app/",
   },
   openGraph: {
-    title: "LeadGen Pro | Prospecção Ativa B2B e Vendas",
+    title: "LeadHunter | Prospecção B2B",
     description: "Plataforma avançada de Lead Generation B2B. Encontre empresas sem site, com SSL inválido e oportunidades claras para serviços web de alta conversão.",
     url: "https://leadgen-b2b.vercel.app/",
     type: "website",
-    siteName: "LeadGen Pro",
+    siteName: "LeadHunter",
     images: [
       {
         url: "https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&q=80&w=1200&h=630",
         width: 1200,
         height: 630,
-        alt: "Dashboard LeadGen Pro",
+        alt: "Dashboard LeadHunter",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "LeadGen Pro | Prospecção Ativa B2B e Vendas",
+    title: "LeadHunter | Prospecção B2B",
     description: "Plataforma avançada de Lead Generation B2B. Encontre empresas sem site, com SSL inválido e oportunidades claras para serviços web de alta conversão.",
     images: ["https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&q=80&w=1200&h=630"],
   },

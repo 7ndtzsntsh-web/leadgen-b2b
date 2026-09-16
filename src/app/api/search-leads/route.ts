@@ -9,19 +9,29 @@ async function extractEmail(url: string): Promise<string> {
   try {
     const target = url.startsWith('http') ? url : `http://${url}`;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000); 
+    const timeoutId = setTimeout(() => controller.abort(), 3500); 
     
     const res = await fetch(target, { 
       signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LeadGenBot/5.0)' }
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LeadGenBot/6.0)' }
     });
     clearTimeout(timeoutId);
 
     const html = await res.text();
+    // RFC 5322 regex simplificada
     const emailMatches = html.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/gi);
     
     if (emailMatches) {
-      const validEmails = emailMatches.filter(e => !e.endsWith('.png') && !e.endsWith('.jpg') && !e.endsWith('.jpeg') && !e.endsWith('.gif'));
+      const invalidExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.zip', '.pdf', '.webp', '.svg'];
+      const placeholderDomains = ['seusite.com', 'seudominio.com', 'example.com', 'wixsite.com'];
+      
+      const validEmails = emailMatches.filter(e => {
+        const lower = e.toLowerCase();
+        if (invalidExtensions.some(ext => lower.endsWith(ext))) return false;
+        if (placeholderDomains.some(domain => lower.includes(domain))) return false;
+        return true;
+      });
+
       if (validEmails.length > 0) return validEmails[0].toLowerCase();
     }
     return 'N/D';
@@ -30,12 +40,34 @@ async function extractEmail(url: string): Promise<string> {
   }
 }
 
+function cleanPhone(phone: string, country: string): string {
+  if (!phone || phone === 'Não informado') return 'Não informado';
+  const digits = phone.replace(/\D/g, '');
+  
+  // Anti-fake (sequências repetidas ex: 000000000, 999999999)
+  if (/^(\d)\1+$/.test(digits)) return 'Não informado';
+  
+  if (country === 'br') {
+    // DDD (2) + Fixo (8) = 10 ou DDD (2) + Celular (9) = 11. Remove código de país se houver.
+    const brDigits = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits;
+    if (brDigits.length >= 10 && brDigits.length <= 11) {
+      return phone; // Válido
+    }
+    return 'Não informado';
+  } else {
+    // Padrão E.164 genérico
+    if (digits.length >= 8 && digits.length <= 15) return phone;
+    return 'Não informado';
+  }
+}
+
 function getPhoneType(phone: string, country: string): 'MOBILE' | 'LANDLINE' | 'UNKNOWN' {
   if (phone === 'Não informado' || !phone) return 'UNKNOWN';
   const digits = phone.replace(/\D/g, '');
   if (country === 'br') {
-    if (digits.length === 11 && digits[2] === '9') return 'MOBILE';
-    if (digits.length >= 10 && digits.length <= 11) return 'LANDLINE';
+    const brDigits = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits;
+    if (brDigits.length === 11 && brDigits[2] === '9') return 'MOBILE';
+    if (brDigits.length === 10) return 'LANDLINE';
   }
   return 'UNKNOWN';
 }
@@ -132,7 +164,9 @@ export async function GET(req: NextRequest) {
                 
                 if (data.places) {
                   for (const p of data.places) {
-                    const phone = p.nationalPhoneNumber || 'Não informado';
+                    const rawPhone = p.nationalPhoneNumber || 'Não informado';
+                    const phone = cleanPhone(rawPhone, country);
+                    
                     if (!seenIds.has(p.id) && !(phone !== 'Não informado' && seenPhones.has(phone))) {
                       seenIds.add(p.id);
                       if (phone !== 'Não informado') seenPhones.add(phone);
@@ -174,7 +208,9 @@ export async function GET(req: NextRequest) {
                   const data: any = await nomRes.json();
                   for (const p of data) {
                     const tags = p.extratags || {};
-                    const phone = tags.phone || tags['contact:phone'] || tags['contact:whatsapp'] || 'Não informado';
+                    const rawPhone = tags.phone || tags['contact:phone'] || tags['contact:whatsapp'] || 'Não informado';
+                    const phone = cleanPhone(rawPhone, country);
+                    
                     if (!seenIds.has(p.osm_id) && !(phone !== 'Não informado' && seenPhones.has(phone))) {
                       seenIds.add(p.osm_id);
                       if (phone !== 'Não informado') seenPhones.add(phone);
