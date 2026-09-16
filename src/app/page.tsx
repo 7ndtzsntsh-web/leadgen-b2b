@@ -8,10 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DomainStatus } from "@/lib/domainValidator";
+import { uiTranslations } from "@/lib/semanticDictionary";
 
 export interface Lead {
   id: string;
@@ -38,9 +38,12 @@ export default function Home() {
   const [category, setCategory] = useState("");
   const [city, setCity] = useState("");
   const [volume, setVolume] = useState("50");
+  const [country, setCountry] = useState("br");
   const [noSite, setNoSite] = useState(false);
   const [insecure, setInsecure] = useState(false);
-  const [radius, setRadius] = useState([15]);
+
+  // Textos Dinâmicos (Internacionalização)
+  const t = uiTranslations[country] || uiTranslations["br"];
 
   const stopSearch = () => {
     if (eventSourceRef.current) {
@@ -48,7 +51,7 @@ export default function Home() {
       eventSourceRef.current = null;
     }
     setLoading(false);
-    setStatusMessage("Busca interrompida.");
+    setStatusMessage(t.buttonStop + "...");
   };
 
   const startSearch = () => {
@@ -57,16 +60,16 @@ export default function Home() {
       return;
     }
     
-    // Reset state
     setLeads([]);
     setLoading(true);
     setHasSearched(true);
-    setStatusMessage("Iniciando conexão com o motor de busca...");
+    setStatusMessage("Connecting...");
 
     const params = new URLSearchParams();
     params.append("category", category);
     if (city.trim()) params.append("city", city);
     params.append("volume", volume);
+    params.append("country", country);
 
     const sse = new EventSource(`/api/search-leads?${params.toString()}`);
     eventSourceRef.current = sse;
@@ -77,15 +80,12 @@ export default function Home() {
         setStatusMessage(parsed.message);
       } else if (parsed.type === 'lead') {
         const newLead = parsed.data as Lead;
-        // Aplicar filtros de interface em tempo real
         if (noSite && newLead.siteStatus !== 'Sem Site') return;
         if (insecure && newLead.siteStatus !== 'HTTP Inseguro' && newLead.siteStatus !== 'Erro 404/Inativo') return;
         
         setLeads(prev => {
-          // Evitar duplicação acidental na renderização
           if (prev.some(l => l.id === newLead.id)) return prev;
           const updated = [...prev, newLead];
-          // Ordenar pelo Score
           return updated.sort((a, b) => b.score - a.score);
         });
       } else if (parsed.type === 'done' || parsed.type === 'error') {
@@ -98,7 +98,7 @@ export default function Home() {
     sse.onerror = () => {
       sse.close();
       setLoading(false);
-      setStatusMessage("Conexão encerrada ou falha no servidor.");
+      setStatusMessage("Connection closed.");
     };
   };
 
@@ -114,11 +114,24 @@ export default function Home() {
 
   const generatePASCopy = (lead: Lead) => {
     const nicho = lead.category || "seu negócio";
+    const lang = country === 'us' ? 'en' : (country === 'es' ? 'es' : 'pt');
     
     if (lead.siteStatus === 'Sem Site' || lead.siteStatus === 'Erro 404/Inativo') {
-      return `Olá, responsável da ${lead.name}! Tudo bem?\n\nEstava buscando por ${nicho} e percebi que vocês têm excelentes avaliações, mas ainda não possuem um site próprio e profissional operando.\n\nHoje, a maioria dos clientes que pesquisa pelo celular acaba fechando com a concorrência porque clicam no link oficial direto no Google. Vocês estão perdendo de receber contatos diários por causa disso.\n\nPodemos marcar uma rápida reunião, sem compromisso, para eu te mostrar como resolver isso e dominar as buscas na sua região?`;
+      if (lang === 'en') {
+        return `Hi ${lead.name} team! Hope you're doing well.\n\nI was looking for ${nicho} services and noticed you have great reviews, but I couldn't find an official professional website for your business.\n\nToday, most mobile customers end up going to competitors simply because they click on the official link right from Google. You are likely missing out on daily contacts because of this.\n\nCould we schedule a quick, no-obligation meeting so I can show you how to fix this and dominate local searches in your area?`;
+      } else if (lang === 'es') {
+        return `¡Hola equipo de ${lead.name}! ¿Todo bien?\n\nEstaba buscando servicios de ${nicho} y noté que tienen excelentes reseñas, pero aún no cuentan con un sitio web oficial y profesional operando.\n\nHoy en día, la mayoría de los clientes que buscan desde el móvil terminan cerrando con la competencia simplemente porque hacen clic en el enlace oficial directo en Google. Probablemente estén perdiendo contactos diarios por esto.\n\n¿Podríamos agendar una breve reunión sin compromiso para mostrarte cómo resolver esto y dominar las búsquedas en tu zona?`;
+      } else {
+        return `Olá, responsável da ${lead.name}! Tudo bem?\n\nEstava buscando por ${nicho} e percebi que vocês têm excelentes avaliações, mas ainda não possuem um site próprio e profissional operando.\n\nHoje, a maioria dos clientes que pesquisa pelo celular acaba fechando com a concorrência porque clicam no link oficial direto no Google. Vocês estão perdendo de receber contatos diários por causa disso.\n\nPodemos marcar uma rápida reunião, sem compromisso, para eu te mostrar como resolver isso e dominar as buscas na sua região?`;
+      }
     } else {
-      return `Olá, responsável da ${lead.name}! Tudo bem?\n\nEncontrei vocês no Google e fui acessar o site, mas o navegador bloqueou alertando "Não Seguro" (sem certificado HTTPS atualizado).\n\nIsso faz muitos clientes desistirem do contato por medo de vírus ou golpe, além de derrubar o posicionamento de vocês nas buscas.\n\nIdentifiquei exatamente onde está a falha. Podemos marcar uma rápida reunião, sem compromisso, para eu te explicar como consertar isso e voltar a transmitir credibilidade máxima para os clientes?`;
+      if (lang === 'en') {
+        return `Hi ${lead.name} team! Hope you're doing well.\n\nI found you on Google and tried to visit your website, but my browser blocked it with a "Not Secure" warning (missing updated HTTPS certificate).\n\nThis causes many potential customers to leave out of fear of viruses or scams, and it heavily drops your ranking on Google searches.\n\nI identified exactly where the issue is. Could we schedule a quick, no-obligation meeting so I can explain how to fix this and restore full credibility for your clients?`;
+      } else if (lang === 'es') {
+        return `¡Hola equipo de ${lead.name}! ¿Todo bien?\n\nLos encontré en Google e intenté entrar a su sitio web, pero mi navegador lo bloqueó con una alerta de "No Seguro" (falta certificado HTTPS actualizado).\n\nEsto hace que muchos clientes desistan de contactarlos por miedo a virus o estafas, además de hundir su posicionamiento en las búsquedas.\n\nIdentifiqué exactamente dónde está el fallo. ¿Podríamos agendar una breve reunión sin compromiso para explicarte cómo arreglar esto y volver a transmitir máxima credibilidad?`;
+      } else {
+        return `Olá, responsável da ${lead.name}! Tudo bem?\n\nEncontrei vocês no Google e fui acessar o site, mas o navegador bloqueou alertando "Não Seguro" (sem certificado HTTPS atualizado).\n\nIsso faz muitos clientes desistirem do contato por medo de vírus ou golpe, além de derrubar o posicionamento de vocês nas buscas.\n\nIdentifiquei exatamente onde está a falha. Podemos marcar uma rápida reunião, sem compromisso, para eu te explicar como consertar isso e voltar a transmitir credibilidade máxima para os clientes?`;
+      }
     }
   };
 
@@ -131,31 +144,25 @@ export default function Home() {
     if (leads.length === 0) return;
     const allMsgs = leads.map(l => `=== ${l.name} (${l.phone}) ===\n${generatePASCopy(l)}\n`).join('\n');
     navigator.clipboard.writeText(allMsgs);
-    alert("Todas as abordagens foram copiadas!");
+    alert(t.copyAll + " OK!");
   };
 
   const handleOpenWhatsApp = (lead: Lead) => {
     if (lead.phone === 'Não informado') {
-      alert("Este lead não possui telefone cadastrado.");
+      alert("No phone / Sem telefone");
       return;
     }
     const msg = generatePASCopy(lead);
     const num = lead.phone.replace(/\D/g, '');
-    window.open(`https://wa.me/55${num}?text=${encodeURIComponent(msg)}`, '_blank');
+    window.open(`https://wa.me/${country==='br'?'55':''}${num}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   const handleExportCSV = () => {
     if (leads.length === 0) return;
-    const headers = ["Nome da Empresa", "Segmento", "Telefone / WhatsApp", "E-mail", "Endereço", "Status do Site", "URL Atual", "Avaliação Google", "Problema Identificado", "Score de Oportunidade"];
+    const headers = ["Nome da Empresa", "Segmento", "Telefone", "E-mail", "Endereço", "Status do Site", "URL Atual", "Avaliação Google", "Score"];
     const csvContent = [
       headers.join(";"),
       ...leads.map(l => {
-        let problema = "";
-        if (l.siteStatus === 'Sem Site') problema = "Não possui presença web estruturada.";
-        else if (l.siteStatus === 'HTTP Inseguro') problema = "Falta certificado de segurança (Alerta Não Seguro).";
-        else if (l.siteStatus === 'Erro 404/Inativo') problema = "Site fora do ar ou link quebrado.";
-        else problema = "Necessidade de atualização visual/performance.";
-
         return [
           `"${l.name}"`, 
           `"${l.category}"`, 
@@ -165,7 +172,6 @@ export default function Home() {
           `"${l.siteStatus}"`,
           `"${l.website || ''}"`,
           l.rating,
-          `"${problema}"`,
           l.score
         ].join(";")
       })
@@ -206,13 +212,13 @@ export default function Home() {
             <h1 className="font-serif italic font-light text-4xl md:text-5xl text-white tracking-wide">
               Lead Generation <span className="text-primary not-italic font-sans font-semibold tracking-tighter">Pro</span>
             </h1>
-            <p className="font-mono text-muted-foreground">Motor de prospecção inteligente e contínua em larga escala.</p>
+            <p className="font-mono text-muted-foreground">{t.title}</p>
           </header>
 
           <Card className="backdrop-blur-xl bg-black/40 border border-white/20 rounded-3xl shadow-2xl overflow-hidden">
             <CardHeader className="border-b border-white/10 bg-white/5">
-              <CardTitle className="font-serif italic font-light text-2xl">Mineração em Massa</CardTitle>
-              <CardDescription className="font-mono text-xs">Busca semântica ampla. A cidade é opcional para buscas estaduais ou nacionais.</CardDescription>
+              <CardTitle className="font-serif italic font-light text-2xl">Grid Search</CardTitle>
+              <CardDescription className="font-mono text-xs">A busca cobre áreas inteiras baseadas no país escolhido, sem limite de raio fixo.</CardDescription>
             </CardHeader>
             <CardContent className="p-6">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -220,11 +226,11 @@ export default function Home() {
                 <div className="space-y-4 col-span-1 md:col-span-2">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Nicho / Segmento *</label>
+                      <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">{t.niche}</label>
                       <div className="relative">
                         <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                         <Input 
-                          placeholder="Ex: Padaria, Clínica, Advocacia" 
+                          placeholder={t.nichePlaceholder}
                           className="pl-9 bg-black/20 border-white/10 text-white placeholder:text-muted-foreground focus-visible:ring-primary/50"
                           value={category}
                           onChange={(e) => setCategory(e.target.value)}
@@ -233,14 +239,27 @@ export default function Home() {
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Região / Cidade (Opcional)</label>
-                      <Input 
-                        placeholder="Ex: SP, Nordeste ou Brasil" 
-                        value={city}
-                        onChange={(e) => setCity(e.target.value)}
-                        className="bg-black/20 border-white/10" 
-                        onKeyDown={(e) => e.key === 'Enter' && startSearch()}
-                      />
+                      <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">{t.city}</label>
+                      <div className="flex gap-2">
+                        <Select value={country} onValueChange={(val) => { if (val) setCountry(val); }}>
+                          <SelectTrigger className="bg-black/20 border-white/10 w-24">
+                            <SelectValue placeholder="País" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="br">BR 🇧🇷</SelectItem>
+                            <SelectItem value="pt">PT 🇵🇹</SelectItem>
+                            <SelectItem value="us">US 🇺🇸</SelectItem>
+                            <SelectItem value="es">ES 🇪🇸</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Input 
+                          placeholder={t.cityPlaceholder}
+                          value={city}
+                          onChange={(e) => setCity(e.target.value)}
+                          className="bg-black/20 border-white/10 flex-1" 
+                          onKeyDown={(e) => e.key === 'Enter' && startSearch()}
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -248,11 +267,11 @@ export default function Home() {
                     <div className="flex gap-4">
                       <div className="flex items-center space-x-2">
                         <Checkbox id="no-site" checked={noSite} onCheckedChange={(c) => setNoSite(c as boolean)} className="border-white/20 data-[state=checked]:bg-primary" />
-                        <label htmlFor="no-site" className="text-sm font-medium leading-none text-gray-300">Apenas S/ Site</label>
+                        <label htmlFor="no-site" className="text-sm font-medium leading-none text-gray-300">{t.onlyNoSite}</label>
                       </div>
                       <div className="flex items-center space-x-2">
                         <Checkbox id="insecure" checked={insecure} onCheckedChange={(c) => setInsecure(c as boolean)} className="border-white/20 data-[state=checked]:bg-primary" />
-                        <label htmlFor="insecure" className="text-sm font-medium leading-none text-gray-300">Apenas Inseguros</label>
+                        <label htmlFor="insecure" className="text-sm font-medium leading-none text-gray-300">{t.onlyInsecure}</label>
                       </div>
                     </div>
                   </div>
@@ -260,41 +279,32 @@ export default function Home() {
 
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Volume de Captura</label>
-                    <Select value={volume} onValueChange={(val: string) => setVolume(val || "50")}>
+                    <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">{t.volume}</label>
+                    <Select value={volume} onValueChange={(val) => { if (val) setVolume(val); }}>
                       <SelectTrigger className="bg-black/20 border-white/10">
                         <SelectValue placeholder="Volume" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="20">20 Leads Rápidos</SelectItem>
-                        <SelectItem value="50">50 Leads (Médio)</SelectItem>
-                        <SelectItem value="100">100 Leads (Alto)</SelectItem>
-                        <SelectItem value="200">Máximo Possível (200+)</SelectItem>
+                        <SelectItem value="20">20 Leads</SelectItem>
+                        <SelectItem value="50">50 Leads</SelectItem>
+                        <SelectItem value="100">100 Leads</SelectItem>
+                        <SelectItem value="200">Max (200+)</SelectItem>
                       </SelectContent>
                     </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Raio ({radius[0]} km)</label>
-                    <div className="pt-2">
-                      <Slider 
-                        defaultValue={[15]} max={100} min={5} step={5}
-                        value={radius} onValueChange={(val) => setRadius(val as number[])}
-                      />
-                    </div>
                   </div>
                 </div>
                 
                 <div className="flex flex-col justify-end space-y-3">
                   {loading ? (
                     <Button variant="destructive" className="w-full h-12 shadow-[0_0_20px_rgba(220,38,38,0.3)] transition-all" onClick={stopSearch}>
-                      Interromper Busca
+                      {t.buttonStop}
                     </Button>
                   ) : (
                     <Button 
                       className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-12 shadow-[0_0_20px_rgba(var(--primary),0.3)] hover:shadow-[0_0_30px_rgba(var(--primary),0.5)] transition-all"
                       onClick={startSearch}
                     >
-                      Disparar Mineração <Play className="w-4 h-4 ml-2" />
+                      {t.buttonSearch} <Play className="w-4 h-4 ml-2" />
                     </Button>
                   )}
                 </div>
@@ -306,19 +316,19 @@ export default function Home() {
             <CardHeader className="flex flex-row items-center justify-between border-b border-white/10 bg-white/5 flex-wrap gap-4">
               <div>
                 <CardTitle className="font-serif italic font-light text-2xl flex items-center gap-3">
-                  Resultados em Tempo Real
+                  {t.results}
                   {loading && <span className="flex h-3 w-3 relative"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span></span>}
                 </CardTitle>
-                <CardDescription className="font-mono text-xs">{leads.length} leads qualificados capturados. {statusMessage}</CardDescription>
+                <CardDescription className="font-mono text-xs">{leads.length} leads. {statusMessage}</CardDescription>
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white" onClick={handleCopyAllMessages}>
                   <FileText className="w-4 h-4 mr-2" />
-                  Disparar Fila (Copiar Tudo)
+                  {t.copyAll}
                 </Button>
                 <Button variant="outline" size="sm" className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white" onClick={handleExportCSV}>
                   <Download className="w-4 h-4 mr-2" />
-                  Exportar CSV
+                  {t.exportCsv}
                 </Button>
               </div>
             </CardHeader>
@@ -327,7 +337,7 @@ export default function Home() {
                 <TableHeader className="bg-white/5">
                   <TableRow className="border-white/10 hover:bg-transparent">
                     <TableHead className="font-mono text-xs uppercase text-muted-foreground w-[30%]">Empresa & Contato</TableHead>
-                    <TableHead className="font-mono text-xs uppercase text-muted-foreground w-[25%]">Presença Digital (E-mail/Site)</TableHead>
+                    <TableHead className="font-mono text-xs uppercase text-muted-foreground w-[25%]">Presença Digital</TableHead>
                     <TableHead className="font-mono text-xs uppercase text-muted-foreground">Diagnóstico</TableHead>
                     <TableHead className="font-mono text-xs uppercase text-muted-foreground">Score</TableHead>
                     <TableHead className="text-right font-mono text-xs uppercase text-muted-foreground">Abordagem</TableHead>
@@ -336,11 +346,11 @@ export default function Home() {
                 <TableBody>
                   {!hasSearched ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-12 text-muted-foreground font-mono">Preencha um Nicho (Ex: Clínica) e clique em Disparar Mineração.</TableCell>
+                      <TableCell colSpan={5} className="text-center py-12 text-muted-foreground font-mono">Pronto para buscar no país selecionado.</TableCell>
                     </TableRow>
                   ) : leads.length === 0 && !loading ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-12 text-muted-foreground font-mono">Nenhuma oportunidade encontrada com esses critérios precisos.</TableCell>
+                      <TableCell colSpan={5} className="text-center py-12 text-muted-foreground font-mono">Nenhuma oportunidade encontrada.</TableCell>
                     </TableRow>
                   ) : (
                     leads.map((lead) => (
