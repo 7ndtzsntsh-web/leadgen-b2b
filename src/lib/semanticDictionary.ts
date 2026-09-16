@@ -72,17 +72,40 @@ export const semanticDictionary: Record<string, Record<string, string[]>> = {
   }
 };
 
+const cityAliases: Record<string, string> = {
+  "sp": "São Paulo",
+  "sampa": "São Paulo",
+  "rj": "Rio de Janeiro",
+  "floripa": "Florianópolis",
+  "bh": "Belo Horizonte",
+  "bsb": "Brasília",
+  "df": "Brasília",
+  "cwb": "Curitiba",
+  "poa": "Porto Alegre",
+  "ssa": "Salvador",
+  "nyc": "New York",
+  "ny": "New York",
+  "la": "Los Angeles",
+  "cdmx": "Ciudad de México",
+  "lisboa": "Lisbon",
+  "porto": "Oporto"
+};
+
+export function expandCity(cityInput: string): string {
+  const normalized = cityInput.toLowerCase().trim();
+  return cityAliases[normalized] || cityInput; // Retorna o nome completo se for apelido/sigla
+}
+
 export function expandSearchTerm(term: string, country: string = 'br'): string[] {
   const normalizedTerm = term.toLowerCase().trim();
   
   const matchedKey = Object.keys(semanticDictionary).find(key => 
-    key.includes(normalizedTerm) || normalizedTerm.includes(key)
+    key === normalizedTerm || key.includes(normalizedTerm) || normalizedTerm.includes(key)
   );
 
   let expanded = new Set<string>();
-  expanded.add(normalizedTerm);
+  expanded.add(normalizedTerm); // Sempre inclui a string original exata digitada pelo usuário
 
-  // Mapear fallback de país para idiomas principais
   const langMap: Record<string, string> = {
     'us': 'us', 'ca': 'us', 'uk': 'us',
     'es': 'es', 'mx': 'es', 'ar': 'es', 'co': 'es',
@@ -94,7 +117,6 @@ export function expandSearchTerm(term: string, country: string = 'br'): string[]
   if (matchedKey && semanticDictionary[matchedKey][mappedLang]) {
     semanticDictionary[matchedKey][mappedLang].forEach(synonym => expanded.add(synonym));
   } else if (matchedKey && semanticDictionary[matchedKey]['us']) {
-    // Fallback pra ingles
     semanticDictionary[matchedKey]['us'].forEach(synonym => expanded.add(synonym));
   }
 
@@ -105,22 +127,22 @@ export const uiTranslations: Record<string, Record<string, string>> = {
   "br": {
     title: "Motor de prospecção inteligente e contínua em larga escala.",
     niche: "Nicho / Segmento *",
-    nichePlaceholder: "Ex: Padaria, Clínica, Advocacia",
+    nichePlaceholder: "Qualquer nicho (Ex: Padaria, Usinagem, TI)",
     city: "Região / Cidade (Opcional)",
-    cityPlaceholder: "Ex: SP, Nordeste ou Brasil",
+    cityPlaceholder: "Ex: SP, Floripa, RJ ou Brasil",
     onlyNoSite: "Apenas S/ Site",
     onlyInsecure: "Apenas Inseguros",
     volume: "Volume de Captura",
     buttonSearch: "Disparar Mineração",
     buttonStop: "Interromper Busca",
-    results: "Resultados em Tempo Real",
+    results: "Resultados em Tempo Real (Leads com Contato)",
     exportCsv: "Exportar CSV",
     copyAll: "Disparar Fila (Copiar Tudo)"
   },
   "pt": {
     title: "Motor de prospeção inteligente e contínua em larga escala.",
     niche: "Nicho / Segmento *",
-    nichePlaceholder: "Ex: Pastelaria, Clínica, Advocacia",
+    nichePlaceholder: "Ex: Pastelaria, TI, Usinagem",
     city: "Região / Cidade (Opcional)",
     cityPlaceholder: "Ex: Lisboa, Porto ou Portugal",
     onlyNoSite: "Apenas S/ Site",
@@ -128,37 +150,37 @@ export const uiTranslations: Record<string, Record<string, string>> = {
     volume: "Volume de Captura",
     buttonSearch: "Iniciar Mineração",
     buttonStop: "Parar Busca",
-    results: "Resultados em Tempo Real",
+    results: "Resultados em Tempo Real (Apenas Válidos)",
     exportCsv: "Exportar CSV",
     copyAll: "Copiar Tudo (Fila)"
   },
   "us": {
     title: "Intelligent, continuous large-scale prospecting engine.",
     niche: "Niche / Industry *",
-    nichePlaceholder: "Ex: Bakery, Clinic, Law Firm",
+    nichePlaceholder: "Any niche (e.g., Bakery, IT, Machining)",
     city: "Region / City (Optional)",
-    cityPlaceholder: "Ex: NY, Texas or USA",
+    cityPlaceholder: "e.g., NYC, LA, Texas or USA",
     onlyNoSite: "No Website Only",
     onlyInsecure: "Insecure (HTTP) Only",
     volume: "Capture Volume",
     buttonSearch: "Start Mining",
     buttonStop: "Stop Mining",
-    results: "Real-Time Results",
+    results: "Real-Time Results (Valid Contacts Only)",
     exportCsv: "Export CSV",
     copyAll: "Copy All Messages"
   },
   "es": {
     title: "Motor de prospección inteligente y continua a gran escala.",
     niche: "Nicho / Sector *",
-    nichePlaceholder: "Ej: Panadería, Clínica, Abogados",
+    nichePlaceholder: "Cualquier nicho (Ej: Panadería, TI, Mecanizado)",
     city: "Región / Ciudad (Opcional)",
-    cityPlaceholder: "Ej: Madrid, CDMX",
+    cityPlaceholder: "Ej: CDMX, Madrid",
     onlyNoSite: "Solo Sin Web",
     onlyInsecure: "Solo Inseguros",
     volume: "Volumen de Captura",
     buttonSearch: "Iniciar Prospección",
     buttonStop: "Detener Búsqueda",
-    results: "Resultados en Tiempo Real",
+    results: "Resultados (Solo Contactos Válidos)",
     exportCsv: "Exportar CSV",
     copyAll: "Copiar Todo"
   }

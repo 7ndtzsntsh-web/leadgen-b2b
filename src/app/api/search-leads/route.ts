@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { expandSearchTerm } from '@/lib/semanticDictionary';
+import { expandSearchTerm, expandCity } from '@/lib/semanticDictionary';
 import { validateDomain, DomainStatus } from '@/lib/domainValidator';
 
 const GOOGLE_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
@@ -13,7 +13,7 @@ async function extractEmail(url: string): Promise<string> {
     
     const res = await fetch(target, { 
       signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LeadGenBot/2.0)' }
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LeadGenBot/3.0)' }
     });
     clearTimeout(timeoutId);
 
@@ -32,10 +32,25 @@ async function extractEmail(url: string): Promise<string> {
   }
 }
 
+function getPhoneType(phone: string, country: string): 'MOBILE' | 'LANDLINE' | 'UNKNOWN' {
+  if (phone === 'Não informado' || !phone) return 'UNKNOWN';
+  const digits = phone.replace(/\D/g, '');
+  if (country === 'br') {
+    // Celular BR geralmente tem 11 dígitos e começa com 9 após o DDD
+    // ex: 11 9XXXX-XXXX (11 digitos)
+    if (digits.length === 11 && digits[2] === '9') return 'MOBILE';
+    if (digits.length >= 10 && digits.length <= 11) return 'LANDLINE';
+  } else if (country === 'us') {
+    // US phones have 10 digits usually. Harder to differentiate just by pattern, default to UNKNOWN or assume MOBILE for WhatsApp fallback
+    return 'UNKNOWN';
+  }
+  return 'UNKNOWN';
+}
+
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
   const term = searchParams.get('category') || '';
-  const city = searchParams.get('city') || '';
+  const rawCity = searchParams.get('city') || '';
   const country = searchParams.get('country') || 'br';
   const volume = parseInt(searchParams.get('volume') || '50');
 
@@ -43,11 +58,9 @@ export async function GET(req: NextRequest) {
     return new Response('Parâmetro category é obrigatório', { status: 400 });
   }
 
-  // Mapeamento dinâmico baseado no país selecionado
   const termsToSearch = expandSearchTerm(term, country);
+  const city = expandCity(rawCity);
   
-  // Mapeamento de Zonas (Grid Search) para garantir varredura de ponta a ponta
-  // Se city for informada, dividimos a busca. Se não, busca o país inteiro.
   let locationQueries: string[] = [];
   if (city) {
     if (country === 'us') {
@@ -58,7 +71,6 @@ export async function GET(req: NextRequest) {
       locationQueries = [`${city}`, `${city} Centro`, `${city} Norte`, `${city} Sul`, `${city} Leste`, `${city} Oeste`];
     }
   } else {
-    // Busca ampla de país
     const countryNames: Record<string, string> = { 'br': 'Brasil', 'pt': 'Portugal', 'us': 'United States', 'es': 'España' };
     locationQueries = [countryNames[country] || 'Brasil'];
   }
@@ -73,25 +85,25 @@ export async function GET(req: NextRequest) {
         }
       };
 
-      sendEvent({ type: 'info', message: `Iniciando varredura semântica para ${termsToSearch[0]}...` });
+      sendEvent({ type: 'info', message: `Iniciando varredura profunda para ${termsToSearch[0]}...` });
 
       let rawResults: any[] = [];
       const seenIds = new Set();
-      const seenPhones = new Set(); // Deduplicação agressiva por telefone
+      const seenPhones = new Set();
+      let totalValidStreamed = 0;
 
       try {
         if (GOOGLE_API_KEY) {
-          // MOTOR: GOOGLE PLACES API (Grid Search com Zonas)
           sendEvent({ type: 'info', message: 'Utilizando motor Google Places API...' });
           
           for (const loc of locationQueries) {
-            if (rawResults.length >= volume) break;
+            if (rawResults.length >= volume * 2) break;
             const query = `${termsToSearch.slice(0, 3).join(' OR ')} in ${loc}`;
             
             let nextPageToken = undefined;
             let pagesFetched = 0;
 
-            while (rawResults.length < volume && pagesFetched < 3) {
+            while (rawResults.length < volume * 2 && pagesFetched < 3) {
               const gRes: Response = await fetch('https://places.googleapis.com/v1/places:searchText', {
                 method: 'POST',
                 headers: {
@@ -134,26 +146,24 @@ export async function GET(req: NextRequest) {
               pagesFetched++;
 
               sendEvent({ type: 'info', message: `Zona "${loc}": Mapeados ${rawResults.length} locais...` });
-              if (!nextPageToken || rawResults.length >= volume) break;
+              if (!nextPageToken || rawResults.length >= volume * 2) break;
               await new Promise(r => setTimeout(r, 2000));
             }
           }
 
         } else {
-          // MOTOR: NOMINATIM (Fallback Gratuito - Grid Search)
           sendEvent({ type: 'info', message: 'Utilizando motor OpenStreetMap (Fallback Gratuito)...' });
-          
-          const limitPerTerm = Math.ceil(volume / (termsToSearch.length * locationQueries.length));
+          const limitPerTerm = Math.ceil((volume * 2) / (termsToSearch.length * locationQueries.length));
           
           for (const loc of locationQueries) {
-            if (rawResults.length >= volume) break;
+            if (rawResults.length >= volume * 2) break;
             
             for (const t of termsToSearch.slice(0, 3)) {
-              if (rawResults.length >= volume) break;
+              if (rawResults.length >= volume * 2) break;
               const q = `${t} ${loc}`.trim();
 
               const nomRes: Response = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&extratags=1&limit=${Math.max(10, limitPerTerm)}`, {
-                headers: { 'User-Agent': 'LeadGenPro-B2B-App/2.0 (contato@leadgen.com)' }
+                headers: { 'User-Agent': 'LeadGenPro-B2B-App/3.0 (contato@leadgen.com)' }
               });
 
               if (nomRes.ok) {
@@ -161,6 +171,7 @@ export async function GET(req: NextRequest) {
                 for (const p of data) {
                   const tags = p.extratags || {};
                   const phone = tags.phone || tags['contact:phone'] || tags['contact:whatsapp'] || 'Não informado';
+                  const pName = p.name || tags.brand || 'Estabelecimento Local';
                   
                   if (!seenIds.has(p.osm_id) && !(phone !== 'Não informado' && seenPhones.has(phone))) {
                     seenIds.add(p.osm_id);
@@ -170,7 +181,7 @@ export async function GET(req: NextRequest) {
                     
                     rawResults.push({
                       id: p.osm_id.toString(),
-                      name: p.name || tags.brand || 'Estabelecimento Local',
+                      name: pName,
                       category: (p.type || term).replace(/_/g, ' '),
                       phone: phone,
                       address: p.display_name,
@@ -187,15 +198,20 @@ export async function GET(req: NextRequest) {
           }
         }
 
-        // Cortar volume exato e limpar "Estabelecimento Local"
-        rawResults = rawResults.slice(0, volume).filter(l => l.name !== 'Estabelecimento Local');
-        sendEvent({ type: 'info', message: `Iniciando extração profunda (SSL/E-mails) para ${rawResults.length} leads...` });
+        // Remover locais genéricos sem nome
+        rawResults = rawResults.filter(l => l.name !== 'Estabelecimento Local');
+        sendEvent({ type: 'info', message: `Iniciando extração profunda (SSL/E-mails) para validação...` });
 
+        // Processar em lote até atingir o volume exato de leads *VÁLIDOS*
         const batchSize = 5; 
         for (let i = 0; i < rawResults.length; i += batchSize) {
+          if (totalValidStreamed >= volume) break;
+
           const batch = rawResults.slice(i, i + batchSize);
           
           await Promise.all(batch.map(async (rawLead) => {
+            if (totalValidStreamed >= volume) return; // Stop async tasks if volume reached
+
             let siteStatus: DomainStatus | 'Sem Site' = 'Sem Site';
             let email = 'N/D';
 
@@ -206,6 +222,13 @@ export async function GET(req: NextRequest) {
               }
             }
 
+            // REGRA: SE NÃO TEM TELEFONE E NÃO TEM E-MAIL, DESCARTAR IMEDIATAMENTE (LEAD INÚTIL)
+            if (rawLead.phone === 'Não informado' && email === 'N/D') {
+              return;
+            }
+
+            const phoneType = getPhoneType(rawLead.phone, country);
+
             let score = 0;
             if (siteStatus === 'Sem Site') score += 50;
             if (siteStatus === 'HTTP Inseguro') score += 40;
@@ -214,19 +237,22 @@ export async function GET(req: NextRequest) {
             if (Number(rawLead.rating) < 4.0 && Number(rawLead.rating) > 0) score += 20;
             if (rawLead.phone !== 'Não informado') score += 10;
             if (email !== 'N/D') score += 10;
+            if (phoneType === 'MOBILE') score += 5; // Whatsapp gives a little bonus
 
             const enrichedLead = {
               ...rawLead,
               siteStatus,
               email,
+              phoneType,
               score: Math.min(score, 100)
             };
 
+            totalValidStreamed++;
             sendEvent({ type: 'lead', data: enrichedLead });
           }));
         }
 
-        sendEvent({ type: 'done', message: 'Mineração concluída!' });
+        sendEvent({ type: 'done', message: `Mineração concluída! ${totalValidStreamed} leads perfeitos.` });
 
       } catch (error) {
         console.error('SSE Error:', error);
