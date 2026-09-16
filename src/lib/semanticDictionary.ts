@@ -5,11 +5,16 @@ export const semanticDictionary: Record<string, Record<string, string[]>> = {
   "supermercado": { "br": ["supermercado", "mercado", "mercearia", "minimercado", "hortifruti"], "us": ["supermarket", "grocery store", "market", "convenience store", "produce market"], "es": ["supermercado", "mercado", "tienda de abarrotes", "frutería"], "pt": ["supermercado", "mercado", "mercearia", "minimercado"] },
   "clínica": { "br": ["clínica", "consultório", "policlínica", "centro médico", "hospital"], "us": ["clinic", "medical office", "medical center", "health center"], "es": ["clínica", "consultorio", "policlínica", "centro médico"], "pt": ["clínica", "consultório", "centro médico"] },
   "odontologia": { "br": ["odontologia", "dentista", "clínica odontológica", "ortodontia", "implantes"], "us": ["dentist", "dental clinic", "orthodontist", "dental care"], "es": ["odontología", "dentista", "clínica dental", "ortodoncia"], "pt": ["medicina dentária", "dentista", "clínica dentária", "ortodontia"] },
-  "estética": { "br": ["estética", "centro de estética", "spa", "clínica de beleza", "harmonização facial"], "us": ["aesthetic clinic", "beauty salon", "spa", "beauty center"], "es": ["estética", "centro de estética", "spa", "clínica de belleza"], "pt": ["estética", "centro de estética", "spa", "clínica de beleza"] },
+  "estética": { "br": ["estética", "centro de estética", "spa", "clínica de beleza", "harmonização facial", "biomedicina estética", "depilação a laser"], "us": ["aesthetic clinic", "beauty salon", "spa", "laser hair removal"], "es": ["estética", "centro de estética", "spa", "clínica de belleza"], "pt": ["estética", "centro de estética", "spa", "clínica de beleza"] },
   "salão": { "br": ["salão de beleza", "cabeleireiro", "barbearia", "esmalteria", "studio de beleza"], "us": ["beauty salon", "hair salon", "barbershop", "nail salon"], "es": ["salón de belleza", "peluquería", "barbería", "salón de uñas"], "pt": ["salão de beleza", "cabeleireiro", "barbearia"] },
   "advocacia": { "br": ["advocacia", "escritório de advocacia", "advogado", "jurídico"], "us": ["law firm", "lawyer", "attorney", "legal services"], "es": ["abogado", "bufete de abogados", "despacho de abogados"], "pt": ["escritório de advogados", "advocacia", "advogado"] },
-  "oficina": { "br": ["oficina mecânica", "auto center", "mecânica", "funilaria", "centro automotivo"], "us": ["auto repair", "mechanic", "auto shop", "body shop"], "es": ["taller mecánico", "mecánico", "taller de autos", "chapa y pintura"], "pt": ["oficina mecânica", "mecânico", "bate-chapas"] },
-  "imobiliária": { "br": ["imobiliária", "corretor de imóveis", "venda de imóveis", "incorporadora"], "us": ["real estate", "realtor", "property management", "real estate agency"], "es": ["inmobiliaria", "bienes raíces", "agente inmobiliario"], "pt": ["imobiliária", "agência imobiliária", "mediador imobiliário"] }
+  "oficina": { "br": ["oficina mecânica", "auto center", "mecânica", "funilaria", "centro automotivo", "borracharia", "autopeças"], "us": ["auto repair", "mechanic", "auto shop", "body shop"], "es": ["taller mecánico", "mecánico", "taller de autos", "chapa y pintura"], "pt": ["oficina mecânica", "mecânico", "bate-chapas"] },
+  "imobiliária": { "br": ["imobiliária", "corretor de imóveis", "venda de imóveis", "incorporadora"], "us": ["real estate", "realtor", "property management", "real estate agency"], "es": ["inmobiliaria", "bienes raíces", "agente inmobiliario"], "pt": ["imobiliária", "agência imobiliária", "mediador imobiliário"] },
+  "energia solar": { "br": ["energia solar", "painel solar", "energia fotovoltaica", "instalador solar", "engenharia elétrica"], "us": ["solar energy", "solar panel", "photovoltaic", "solar installer"], "es": ["energía solar", "panel solar", "fotovoltaica", "instalador solar"], "pt": ["energia solar", "painel solar", "energia fotovoltaica"] },
+  "serralheria": { "br": ["serralheria", "estruturas metálicas", "portões de alumínio", "vidraçaria", "soldador", "esquadrias"], "us": ["locksmith", "metal structures", "metalworking", "welder"], "es": ["cerrajería", "estructuras metálicas", "vidriería", "soldador"], "pt": ["serralharia", "estruturas metálicas", "soldador"] },
+  "usinagem": { "br": ["usinagem", "tornearia", "corte a laser", "metalúrgica", "ferramentaria", "caldeiraria", "cnc"], "us": ["machining", "metalworking", "laser cutting", "cnc machining"], "es": ["mecanizado", "metalurgia", "corte láser"], "pt": ["usinagem", "metalúrgica", "corte a laser"] },
+  "logística": { "br": ["logística", "transportadora", "frete", "distribuidora", "armazém", "galpão logístico"], "us": ["logistics", "freight", "transportation", "warehouse"], "es": ["logística", "transporte", "distribuidora"], "pt": ["logística", "transportadora", "armazém"] },
+  "contabilidade": { "br": ["contabilidade", "escritório contábil", "contador", "assessoria contábil"], "us": ["accounting", "cpa", "bookkeeping", "accountant"], "es": ["contabilidad", "contador", "asesoría contable"], "pt": ["contabilidade", "gabinete de contabilidade", "contabilista"] }
 };
 
 const cityAliases: Record<string, string> = {
@@ -21,22 +26,22 @@ const cityAliases: Record<string, string> = {
 
 // Cidades altamente densas e econômicas ao redor dos grandes centros
 const expansionMap: Record<string, string[]> = {
-  "São Paulo": ["Guarulhos", "Campinas", "Osasco", "Santo André", "São Bernardo do Campo", "São Caetano do Sul", "Diadema", "Barueri", "Sorocaba", "Jundiaí"],
-  "Rio de Janeiro": ["Niterói", "Duque de Caxias", "Nova Iguaçu", "São Gonçalo", "Petrópolis", "Cabo Frio"],
-  "Florianópolis": ["São José", "Palhoça", "Biguaçu", "Balneário Camboriú", "Itajaí", "Blumenau", "Joinville", "Criciúma"],
-  "Belo Horizonte": ["Contagem", "Betim", "Nova Lima", "Uberlândia", "Juiz de Fora", "Ipatinga"],
-  "Curitiba": ["São José dos Pinhais", "Londrina", "Maringá", "Ponta Grossa", "Cascavel", "Colombo"],
-  "Brasília": ["Taguatinga", "Águas Claras", "Goiânia", "Anápolis", "Aparecida de Goiânia"],
-  "Porto Alegre": ["Caxias do Sul", "Canoas", "Novo Hamburgo", "Pelotas", "Santa Maria", "São Leopoldo"],
-  "Salvador": ["Lauro de Freitas", "Camaçari", "Feira de Santana", "Vitória da Conquista"],
-  "Recife": ["Jaboatão dos Guararapes", "Olinda", "Caruaru", "Paulista"],
-  "Fortaleza": ["Caucaia", "Maracanaú", "Sobral", "Juazeiro do Norte"],
-  "New York": ["Brooklyn", "Queens", "Jersey City", "Newark", "Yonkers", "Hoboken"],
-  "Los Angeles": ["Long Beach", "Anaheim", "Santa Ana", "Irvine", "Glendale"],
-  "Miami": ["Fort Lauderdale", "Boca Raton", "West Palm Beach", "Hollywood"],
-  "Lisbon": ["Sintra", "Cascais", "Amadora", "Oeiras", "Loures", "Almada"],
-  "Oporto": ["Vila Nova de Gaia", "Matosinhos", "Maia", "Gondomar", "Braga"],
-  "Ciudad de México": ["Naucalpan", "Tlalnepantla", "Ecatepec", "Nezahualcóyotl", "Toluca"]
+  "São Paulo": ["Guarulhos", "Campinas", "Osasco", "Santo André", "São Bernardo do Campo", "São Caetano do Sul", "Diadema", "Barueri", "Sorocaba", "Jundiaí", "Ribeirão Preto", "São José dos Campos", "Santos", "Mauá", "Mogi das Cruzes"],
+  "Rio de Janeiro": ["Niterói", "Duque de Caxias", "Nova Iguaçu", "São Gonçalo", "Petrópolis", "Cabo Frio", "Volta Redonda", "Macaé", "Campos dos Goytacazes", "Belford Roxo"],
+  "Florianópolis": ["São José", "Palhoça", "Biguaçu", "Balneário Camboriú", "Itajaí", "Blumenau", "Joinville", "Criciúma", "Tubarão", "Lages", "Chapecó", "Brusque"],
+  "Belo Horizonte": ["Contagem", "Betim", "Nova Lima", "Uberlândia", "Juiz de Fora", "Ipatinga", "Sete Lagoas", "Divinópolis", "Governador Valadares", "Montes Claros", "Uberaba"],
+  "Curitiba": ["São José dos Pinhais", "Londrina", "Maringá", "Ponta Grossa", "Cascavel", "Colombo", "Foz do Iguaçu", "Guarapuava", "Paranaguá"],
+  "Brasília": ["Taguatinga", "Águas Claras", "Goiânia", "Anápolis", "Aparecida de Goiânia", "Luziânia", "Rio Verde", "Valparaíso de Goiás"],
+  "Porto Alegre": ["Caxias do Sul", "Canoas", "Novo Hamburgo", "Pelotas", "Santa Maria", "São Leopoldo", "Rio Grande", "Passo Fundo", "Gravataí", "Viamão"],
+  "Salvador": ["Lauro de Freitas", "Camaçari", "Feira de Santana", "Vitória da Conquista", "Itabuna", "Ilhéus", "Juazeiro", "Jequié"],
+  "Recife": ["Jaboatão dos Guararapes", "Olinda", "Caruaru", "Paulista", "Petrolina", "Cabo de Santo Agostinho", "Camaragibe", "Garanhuns"],
+  "Fortaleza": ["Caucaia", "Maracanaú", "Sobral", "Juazeiro do Norte", "Crato", "Itapipoca", "Maranguape"],
+  "New York": ["Brooklyn", "Queens", "Jersey City", "Newark", "Yonkers", "Hoboken", "White Plains", "Stamford", "Hempstead"],
+  "Los Angeles": ["Long Beach", "Anaheim", "Santa Ana", "Irvine", "Glendale", "Pasadena", "Huntington Beach", "Riverside"],
+  "Miami": ["Fort Lauderdale", "Boca Raton", "West Palm Beach", "Hollywood", "Pompano Beach", "Coral Springs", "Miami Beach"],
+  "Lisbon": ["Sintra", "Cascais", "Amadora", "Oeiras", "Loures", "Almada", "Odivelas", "Seixal", "Vila Franca de Xira"],
+  "Oporto": ["Vila Nova de Gaia", "Matosinhos", "Maia", "Gondomar", "Braga", "Guimarães", "Santa Maria da Feira"],
+  "Ciudad de México": ["Naucalpan", "Tlalnepantla", "Ecatepec", "Nezahualcóyotl", "Toluca", "Chimalhuacán", "Cuautitlán Izcalli"]
 };
 
 export function expandCity(cityInput: string): string {

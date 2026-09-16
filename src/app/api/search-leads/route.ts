@@ -151,59 +151,71 @@ export async function GET(req: NextRequest) {
 
           // Etapa 1: Coletar batch de leads brutos desta cidade (pega a mais para suprir descartes)
           if (GOOGLE_API_KEY) {
+            sendEvent({ type: 'info', message: `Minerando em paralelo [${termsToSearch.length}] sub-nichos em ${currentLoc.city}...` });
+
+            const fetchPromises: Promise<void>[] = [];
+            
             for (const qZone of currentLoc.queries) {
-              if (rawResults.length >= needed * 3) break; // Buscamos bastante para cobrir descartes rigorosos
-              const query = `${termsToSearch.slice(0, 3).join(' OR ')} in ${qZone}`;
+              if (rawResults.length >= needed * 3) break;
               
-              let nextPageToken = undefined;
-              let pagesFetched = 0;
+              // Dispara todas as variações semânticas em paralelo
+              for (const nicheTerm of termsToSearch) {
+                fetchPromises.push((async () => {
+                  const query = `${nicheTerm} in ${qZone}`;
+                  let nextPageToken = undefined;
+                  let pagesFetched = 0;
 
-              while (rawResults.length < needed * 3 && pagesFetched < 4) {
-                const gRes: Response = await fetch('https://places.googleapis.com/v1/places:searchText', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_API_KEY, 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,places.primaryType,nextPageToken' },
-                  body: JSON.stringify({ textQuery: query, pageSize: 20, pageToken: nextPageToken })
-                });
+                  while (pagesFetched < 3) {
+                    const gRes: Response = await fetch('https://places.googleapis.com/v1/places:searchText', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_API_KEY, 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,places.primaryType,nextPageToken' },
+                      body: JSON.stringify({ textQuery: query, pageSize: 20, pageToken: nextPageToken })
+                    });
 
-                if (!gRes.ok) break;
-                const data: any = await gRes.json();
-                
-                if (data.places) {
-                  for (const p of data.places) {
-                    const rawPhone = p.nationalPhoneNumber || 'Não informado';
-                    const phone = cleanPhone(rawPhone, country, currentLoc.city);
+                    if (!gRes.ok) break;
+                    const data: any = await gRes.json();
                     
-                    if (!seenIds.has(p.id) && !(phone !== 'Não informado' && seenPhones.has(phone))) {
-                      seenIds.add(p.id);
-                      if (phone !== 'Não informado') seenPhones.add(phone);
+                    if (data.places) {
+                      for (const p of data.places) {
+                        const rawPhone = p.nationalPhoneNumber || 'Não informado';
+                        const phone = cleanPhone(rawPhone, country, currentLoc.city);
+                        
+                        if (!seenIds.has(p.id) && !(phone !== 'Não informado' && seenPhones.has(phone))) {
+                          seenIds.add(p.id);
+                          if (phone !== 'Não informado') seenPhones.add(phone);
 
-                      rawResults.push({
-                        id: p.id,
-                        name: p.displayName?.text || 'Desconhecido',
-                        category: (p.primaryType || term).replace(/_/g, ' '),
-                        phone: phone,
-                        address: p.formattedAddress || qZone,
-                        rating: p.rating || 0,
-                        reviewsCount: p.userRatingCount || 0,
-                        website: p.websiteUri,
-                        isExpansion: currentLoc.isExpansion,
-                        expansionSource: currentLoc.city
-                      });
+                          rawResults.push({
+                            id: p.id,
+                            name: p.displayName?.text || 'Desconhecido',
+                            category: (p.primaryType || nicheTerm).replace(/_/g, ' '),
+                            phone: phone,
+                            address: p.formattedAddress || qZone,
+                            rating: p.rating || 0,
+                            reviewsCount: p.userRatingCount || 0,
+                            website: p.websiteUri,
+                            isExpansion: currentLoc.isExpansion,
+                            expansionSource: currentLoc.city
+                          });
+                        }
+                      }
                     }
+                    nextPageToken = data.nextPageToken;
+                    pagesFetched++;
+                    if (!nextPageToken) break;
+                    await new Promise(r => setTimeout(r, 1000));
                   }
-                }
-                nextPageToken = data.nextPageToken;
-                pagesFetched++;
-                if (!nextPageToken) break;
-                await new Promise(r => setTimeout(r, 1500));
+                })());
               }
             }
+            
+            await Promise.all(fetchPromises);
           } else {
-            // NOMINATIM FALLBACK
+            // NOMINATIM FALLBACK (Sequential to avoid rate limit)
+            sendEvent({ type: 'info', message: `Minerando sequencialmente [${termsToSearch.length}] sub-nichos em ${currentLoc.city} (Fallback)...` });
             const limitPerTerm = Math.ceil((needed * 3) / (termsToSearch.length * currentLoc.queries.length));
             for (const qZone of currentLoc.queries) {
               if (rawResults.length >= needed * 3) break;
-              for (const t of termsToSearch.slice(0, 3)) {
+              for (const t of termsToSearch) {
                 if (rawResults.length >= needed * 3) break;
                 const q = `${t} ${qZone}`.trim();
                 const nomRes: Response = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&extratags=1&limit=${Math.max(10, limitPerTerm)}`, {
@@ -223,7 +235,7 @@ export async function GET(req: NextRequest) {
                       rawResults.push({
                         id: p.osm_id.toString(),
                         name: p.name || tags.brand || 'Estabelecimento Local',
-                        category: (p.type || term).replace(/_/g, ' '),
+                        category: (p.type || t).replace(/_/g, ' '),
                         phone: phone,
                         address: p.display_name,
                         rating: (3.5 + Math.random() * 1.5).toFixed(1),
@@ -253,6 +265,9 @@ export async function GET(req: NextRequest) {
           const batchSize = 5; 
           for (let i = 0; i < rawResults.length; i += batchSize) {
             if (totalValidStreamed >= volume) break;
+            
+            // UI Progress Indicator Real-Time
+            sendEvent({ type: 'info', message: `Verificando contatos e sites de ${currentLoc.city}... [${totalValidStreamed}/${volume} leads validados]` });
 
             const batch = rawResults.slice(i, i + batchSize);
             
