@@ -194,10 +194,17 @@ export default function Home() {
   };
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="w-20 hidden md:flex flex-col items-center py-8 gap-8 backdrop-blur-xl bg-black/40 border-r border-white/10 z-10 sticky top-0 h-screen transition-all hover:w-64 group">
-        <div className="w-10 h-10 rounded-xl bg-primary/20 border border-primary/50 flex items-center justify-center flex-shrink-0">
-          <Globe className="text-primary w-5 h-5" />
+    <div className="relative flex min-h-screen bg-[#090d16] overflow-hidden">
+      {/* Padrão geométrico (Grid Pattern) */}
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none"></div>
+      
+      {/* Gradientes radiais (Glow tech) */}
+      <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-blue-900/15 blur-[120px] rounded-full pointer-events-none"></div>
+      <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-violet-900/10 blur-[120px] rounded-full pointer-events-none"></div>
+
+      <aside className="relative z-10 w-20 hidden md:flex flex-col items-center py-8 gap-8 backdrop-blur-md bg-black/20 border-r border-white/10 sticky top-0 h-screen transition-all hover:w-64 group shadow-[4px_0_24px_rgba(0,0,0,0.2)]">
+        <div className="w-10 h-10 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center flex-shrink-0 overflow-hidden shadow-lg">
+          <img src="/logo.png" alt="Vanguard Logo" className="w-full h-full object-cover" />
         </div>
         <nav className="flex flex-col gap-4 w-full px-4 mt-8">
           {[
@@ -213,14 +220,19 @@ export default function Home() {
         </nav>
       </aside>
 
-      <main className="flex-1 p-6 md:p-12 overflow-y-auto">
+      <main className="relative z-10 flex-1 p-6 md:p-12 overflow-y-auto">
         <div className="max-w-7xl mx-auto space-y-8">
           
-          <header className="space-y-2">
-            <h1 className="font-serif italic font-light text-4xl md:text-5xl text-white tracking-wide">
-              Lead Generation <span className="text-primary not-italic font-sans font-semibold tracking-tighter">Pro</span>
-            </h1>
-            <p className="font-mono text-muted-foreground">{t.title}</p>
+          <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-black/20 p-6 rounded-3xl border border-white/5 backdrop-blur-sm shadow-xl">
+            <div className="flex items-center gap-4">
+              <img src="/logo.png" alt="Vanguard Web Studio" className="w-12 h-12 md:w-16 md:h-16 object-contain rounded-xl shadow-lg border border-white/10" />
+              <div>
+                <h1 className="font-serif italic font-light text-3xl md:text-4xl text-white tracking-wide">
+                  Lead Generation <span className="text-primary not-italic font-sans font-semibold tracking-tighter">Pro</span>
+                </h1>
+                <p className="font-mono text-muted-foreground text-sm mt-1">{t.title}</p>
+              </div>
+            </div>
           </header>
 
           <Card className="backdrop-blur-xl bg-black/40 border border-white/20 rounded-3xl shadow-2xl overflow-hidden">
