@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://leadgen-b2b.vercel.app/sitemap.xml
