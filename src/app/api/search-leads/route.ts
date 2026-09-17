@@ -61,7 +61,9 @@ function cleanPhone(phone: string, country: string, currentLocCity: string): str
       if (validDDDs && !validDDDs.includes(extractedDDD)) {
         return 'Não informado'; // DDD não condiz com a cidade mapeada!
       }
-      return phone; // Válido
+      // Formata como (DD) XXXXXXXX sem separadores desnecessários
+      const numFmt = brDigits.slice(2);
+      return `(${extractedDDD}) ${numFmt}`; // Exemplo: (11) 945549000
     }
     return 'Não informado';
   } else {
