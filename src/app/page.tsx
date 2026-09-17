@@ -82,6 +82,8 @@ export default function Home() {
     if (city.trim()) params.append("city", city);
     params.append("volume", volume);
     params.append("country", country);
+    if (noSite) params.append("noSite", "true");
+    if (insecure) params.append("insecure", "true");
 
     const sse = new EventSource(`/api/search-leads?${params.toString()}`);
     eventSourceRef.current = sse;

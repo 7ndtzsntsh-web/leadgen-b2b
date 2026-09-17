@@ -111,6 +111,8 @@ export async function GET(req: NextRequest) {
   const rawCity = searchParams.get('city') || '';
   const country = searchParams.get('country') || 'br';
   const volume = parseInt(searchParams.get('volume') || '50');
+  const reqNoSite = searchParams.get('noSite') === 'true';
+  const reqInsecure = searchParams.get('insecure') === 'true';
 
   if (!term) return new Response('Parâmetro category é obrigatório', { status: 400 });
 
@@ -227,14 +229,14 @@ export async function GET(req: NextRequest) {
                     nextPageToken = data.nextPageToken;
                     pagesFetched++;
                     if (!nextPageToken) break;
-                    await new Promise(r => setTimeout(r, 600)); // Delay menor para velocidade
+                    await new Promise(r => setTimeout(r, 300)); // Delay super agressivo para velocidade
                   }
                 });
               }
             }
             
             // Pular processamento de chunks para streaming imediato
-            const fetchBatchSize = 4;
+            const fetchBatchSize = 8;
             for (let i = 0; i < fetchTasks.length; i += fetchBatchSize) {
               if (totalValidStreamed >= volume) break;
               
@@ -248,7 +250,7 @@ export async function GET(req: NextRequest) {
                 const unvalidated = rawResults.splice(0, rawResults.length).filter(l => l.name !== 'Estabelecimento Local');
                 unvalidated.sort((a, b) => b.reviewsCount - a.reviewsCount);
 
-                const valBatchSize = 25;
+                const valBatchSize = 40;
                 for (let j = 0; j < unvalidated.length; j += valBatchSize) {
                   if (totalValidStreamed >= volume) break;
                   
@@ -269,6 +271,9 @@ export async function GET(req: NextRequest) {
                     }
 
                     if (rawLead.phone === 'Não informado' && email === 'N/D') return;
+                    
+                    if (reqNoSite && siteStatus !== 'Sem Site') return;
+                    if (reqInsecure && siteStatus !== 'HTTP Inseguro') return;
 
                     const phoneType = getPhoneType(rawLead.phone, country);
                     
