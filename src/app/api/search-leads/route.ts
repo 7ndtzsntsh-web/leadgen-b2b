@@ -1,3 +1,7 @@
+export const runtime = 'edge';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300; // Hobby/Pro Edge limite relaxado
+
 import { NextRequest } from 'next/server';
 import { expandSearchTerm, expandCity, getExpansionCities, getValidDDDs } from '@/lib/semanticDictionary';
 import { validateDomain, DomainStatus } from '@/lib/domainValidator';
@@ -79,9 +83,24 @@ function getPhoneType(phone: string, country: string): 'MOBILE' | 'LANDLINE' | '
 }
 
 function getCityZones(cityStr: string, country: string): string[] {
+  const c = cityStr.toLowerCase().trim();
+  
+  if (c === "são paulo") {
+    return ["São Paulo", "Centro de São Paulo", "Avenida Paulista, SP", "Pinheiros, SP", "Itaim Bibi, SP", "Moema, SP", "Vila Olímpia, SP", "Santo Amaro, SP", "Lapa, SP", "Santana, SP", "Tatuapé, SP", "Mooca, SP", "Ipiranga, SP", "Jabaquara, SP", "Vila Mariana, SP", "Saúde, SP"];
+  }
+  if (c === "rio de janeiro") {
+    return ["Rio de Janeiro", "Centro, Rio de Janeiro", "Copacabana, RJ", "Botafogo, RJ", "Tijuca, RJ", "Barra da Tijuca, RJ", "Recreio dos Bandeirantes, RJ", "Méier, RJ", "Madureira, RJ", "Campo Grande, RJ", "Bangu, RJ"];
+  }
+  if (c === "belo horizonte") {
+    return ["Belo Horizonte", "Centro, BH", "Savassi, BH", "Lourdes, BH", "Funcionários, BH", "Pampulha, BH", "Venda Nova, BH", "Barreiro, BH", "Buritis, BH", "Sion, BH"];
+  }
+  if (c === "curitiba") {
+    return ["Curitiba", "Centro, Curitiba", "Batel, Curitiba", "Água Verde, Curitiba", "Bigorrilho, Curitiba", "Portão, Curitiba", "Santa Felicidade, Curitiba", "Cidade Industrial, Curitiba", "Boqueirão, Curitiba", "Pinheirinho, Curitiba"];
+  }
+
   if (country === 'us') return [`${cityStr}`, `${cityStr} Downtown`, `${cityStr} North`, `${cityStr} South`];
   if (country === 'es' || country === 'mx') return [`${cityStr}`, `${cityStr} Centro`, `${cityStr} Norte`, `${cityStr} Sur`];
-  return [`${cityStr}`, `${cityStr} Centro`, `${cityStr} Norte`, `${cityStr} Sul`, `${cityStr} Leste`, `${cityStr} Oeste`];
+  return [`${cityStr}`, `${cityStr} Centro`, `${cityStr} Zona Norte`, `${cityStr} Zona Sul`, `${cityStr} Zona Leste`, `${cityStr} Zona Oeste`];
 }
 
 export async function GET(req: NextRequest) {
@@ -94,7 +113,9 @@ export async function GET(req: NextRequest) {
   if (!term) return new Response('Parâmetro category é obrigatório', { status: 400 });
 
   const termsToSearch = expandSearchTerm(term, country);
-  const canonicalCity = expandCity(rawCity);
+  // Se a cidade vier do autocomplete IBGE (ex: "Campinas - SP"), extrai só o nome principal
+  const cleanedCity = rawCity.split(' - ')[0].trim();
+  const canonicalCity = expandCity(cleanedCity);
   
   // Fila Dinâmica de Cidades
   const locationQueue: { city: string; isExpansion: boolean; queries: string[] }[] = [];

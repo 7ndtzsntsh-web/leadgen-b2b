@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { Search, MapPin, Globe, Star, Download, Copy, MessageCircle, Settings, LayoutDashboard, FileText, Play, Phone, CheckCircle2 } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Search, MapPin, Download, CheckCircle2, Play, MessageCircle, Phone, FileText, Copy, Star, LayoutDashboard, Settings, Mail } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -36,6 +36,16 @@ export default function Home() {
   const [statusMessage, setStatusMessage] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const [ibgeCities, setIbgeCities] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetch('https://servicodados.ibge.gov.br/api/v1/localidades/municipios')
+      .then(res => res.json())
+      .then(data => {
+        setIbgeCities(data.map((m: any) => `${m.nome} - ${m.microrregiao.mesorregiao.UF.sigla}`));
+      })
+      .catch(() => {});
+  }, []);
 
   // Filtros
   const [category, setCategory] = useState("");
@@ -312,7 +322,12 @@ export default function Home() {
                           onChange={(e) => setCity(e.target.value)}
                           className="bg-black/20 border-white/10 flex-1" 
                           onKeyDown={(e) => e.key === 'Enter' && startSearch()}
+                          list="ibge-cities"
+                          autoComplete="off"
                         />
+                        <datalist id="ibge-cities">
+                          {ibgeCities.map((c, i) => <option key={i} value={c} />)}
+                        </datalist>
                       </div>
                     </div>
                   </div>
@@ -386,19 +401,76 @@ export default function Home() {
                 </Button>
               </div>
             </CardHeader>
-            <CardContent className="p-0 overflow-x-auto">
-              <div className="min-w-[900px]">
-                <Table>
-                  <TableHeader className="bg-white/5">
-                    <TableRow className="border-white/10 hover:bg-transparent">
-                    <TableHead className="font-mono text-xs uppercase text-muted-foreground w-[30%]">Empresa & Contato</TableHead>
-                    <TableHead className="font-mono text-xs uppercase text-muted-foreground w-[25%]">Presença Digital</TableHead>
-                    <TableHead className="font-mono text-xs uppercase text-muted-foreground">Diagnóstico</TableHead>
-                    <TableHead className="font-mono text-xs uppercase text-muted-foreground">Score</TableHead>
-                    <TableHead className="text-right font-mono text-xs uppercase text-muted-foreground">Abordagem</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
+            <CardContent className="p-0">
+              
+              {/* MOBILE LAYOUT (CARDS) */}
+              <div className="md:hidden flex flex-col gap-4 p-4">
+                {!hasSearched ? (
+                  <div className="text-center py-12 text-muted-foreground font-mono text-sm">Pronto para buscar no país selecionado.</div>
+                ) : leads.length === 0 && !loading ? (
+                  <div className="text-center py-12 text-muted-foreground font-mono text-sm">Nenhuma oportunidade encontrada.</div>
+                ) : (
+                  leads.map(lead => (
+                    <div key={lead.id} className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-3 relative overflow-hidden">
+                      {lead.isExpansion && (
+                        <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>
+                      )}
+                      <div>
+                        <div className="font-medium text-white text-lg flex items-center gap-2">
+                          {lead.name}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1">{lead.category}</div>
+                        {lead.isExpansion && <div className="text-[10px] text-indigo-400 mt-1">🚀 EXPANSÃO: {lead.expansionSource}</div>}
+                      </div>
+                      
+                      <div className="flex flex-col gap-1 text-sm text-gray-300">
+                        {lead.phone !== 'Não informado' && <div className="flex items-center gap-2"><Phone className="w-3 h-3 text-muted-foreground"/> {lead.phone}</div>}
+                        {lead.email !== 'N/D' && <div className="flex items-center gap-2"><Mail className="w-3 h-3 text-muted-foreground"/> {lead.email}</div>}
+                        <div className="flex items-center gap-2"><MapPin className="w-3 h-3 text-muted-foreground"/> <span className="truncate">{lead.address}</span></div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-white/10">
+                        <Badge variant="outline" className={`${getSiteStatusColor(lead.siteStatus)} font-mono text-[10px] uppercase`}>{lead.siteStatus}</Badge>
+                        <div className="flex items-center gap-1">
+                          <Star className="w-3 h-3 text-yellow-500 fill-current" />
+                          <span className="text-xs text-yellow-500">{Number(lead.rating).toFixed(1)}</span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        <Button variant="outline" size="sm" className="bg-white/5 border-white/10 text-xs" onClick={() => { handleCopyMessage(lead); alert("Copiado!"); }}>
+                          <Copy className="w-3 h-3 mr-1" /> Copiar
+                        </Button>
+                        {lead.phone !== 'Não informado' && lead.phoneType === 'LANDLINE' && (
+                          <Button variant="default" size="sm" className="bg-blue-600/20 text-blue-400 border-blue-500/50 text-xs" onClick={() => handleCall(lead)}>
+                            <Phone className="w-3 h-3 mr-1" /> Ligar
+                          </Button>
+                        )}
+                        {lead.phone !== 'Não informado' && lead.phoneType === 'MOBILE' && (
+                          <Button variant="default" size="sm" className="bg-[#25D366]/20 text-[#25D366] border-[#25D366]/50 shadow-[0_0_10px_rgba(37,211,102,0.1)] text-xs" onClick={() => handleOpenWhatsApp(lead)}>
+                            <MessageCircle className="w-3 h-3 mr-1" /> WPP
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* DESKTOP LAYOUT (TABLE) */}
+              <div className="hidden md:block overflow-x-auto">
+                <div className="min-w-[900px]">
+                  <Table>
+                    <TableHeader className="bg-white/5">
+                      <TableRow className="border-white/10 hover:bg-transparent">
+                      <TableHead className="font-mono text-xs uppercase text-muted-foreground w-[30%]">Empresa & Contato</TableHead>
+                      <TableHead className="font-mono text-xs uppercase text-muted-foreground w-[25%]">Presença Digital</TableHead>
+                      <TableHead className="font-mono text-xs uppercase text-muted-foreground">Diagnóstico</TableHead>
+                      <TableHead className="font-mono text-xs uppercase text-muted-foreground">Score</TableHead>
+                      <TableHead className="text-right font-mono text-xs uppercase text-muted-foreground">Abordagem</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                   {!hasSearched ? (
                     <TableRow>
                       <TableCell colSpan={5} className="text-center py-12 text-muted-foreground font-mono">Pronto para buscar no país selecionado.</TableCell>
@@ -524,6 +596,7 @@ export default function Home() {
                   )}
                 </TableBody>
               </Table>
+              </div>
               </div>
             </CardContent>
           </Card>

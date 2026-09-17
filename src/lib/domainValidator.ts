@@ -1,20 +1,11 @@
-import dns from 'dns/promises';
-
 export type DomainStatus = 'SSL Válido' | 'HTTP Inseguro' | 'Erro 404/Inativo';
 
 /**
- * Valida a saúde e segurança de um domínio verificando DNS e requisições HTTP/HTTPS
+ * Valida a saúde e segurança de um domínio verificando requisições HTTP/HTTPS (Edge Compatible)
  */
 export async function validateDomain(domain: string): Promise<DomainStatus> {
   try {
     const hostname = new URL(domain.startsWith('http') ? domain : `https://${domain}`).hostname;
-    
-    // 1. Testa DNS
-    try {
-      await dns.lookup(hostname);
-    } catch {
-      return 'Erro 404/Inativo';
-    }
 
     // 2. Testa HTTPS primeiro (timeout curto para agilidade)
     const controller = new AbortController();
