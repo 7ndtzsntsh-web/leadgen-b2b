@@ -386,10 +386,11 @@ export default function Home() {
                 </Button>
               </div>
             </CardHeader>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader className="bg-white/5">
-                  <TableRow className="border-white/10 hover:bg-transparent">
+            <CardContent className="p-0 overflow-x-auto">
+              <div className="min-w-[900px]">
+                <Table>
+                  <TableHeader className="bg-white/5">
+                    <TableRow className="border-white/10 hover:bg-transparent">
                     <TableHead className="font-mono text-xs uppercase text-muted-foreground w-[30%]">Empresa & Contato</TableHead>
                     <TableHead className="font-mono text-xs uppercase text-muted-foreground w-[25%]">Presença Digital</TableHead>
                     <TableHead className="font-mono text-xs uppercase text-muted-foreground">Diagnóstico</TableHead>
@@ -523,6 +524,7 @@ export default function Home() {
                   )}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
 

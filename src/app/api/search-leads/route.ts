@@ -262,7 +262,7 @@ export async function GET(req: NextRequest) {
           }
 
           // Etapa 2: Validar contatos e Streaming (DESCARTANDO OS INÚTEIS)
-          const batchSize = 5; 
+          const batchSize = 15; // Aumentado para máxima agilidade
           for (let i = 0; i < rawResults.length; i += batchSize) {
             if (totalValidStreamed >= volume) break;
             

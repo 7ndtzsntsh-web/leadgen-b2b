@@ -16,9 +16,9 @@ export async function validateDomain(domain: string): Promise<DomainStatus> {
       return 'Erro 404/Inativo';
     }
 
-    // 2. Testa HTTPS primeiro (timeout curto para não travar a API)
+    // 2. Testa HTTPS primeiro (timeout curto para agilidade)
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
 
     try {
       const httpsRes = await fetch(`https://${hostname}`, { 
@@ -37,7 +37,7 @@ export async function validateDomain(domain: string): Promise<DomainStatus> {
 
     // 3. Testa HTTP Inseguro
     const httpController = new AbortController();
-    const httpTimeoutId = setTimeout(() => httpController.abort(), 5000);
+    const httpTimeoutId = setTimeout(() => httpController.abort(), 2000);
 
     try {
       const httpRes = await fetch(`http://${hostname}`, {
