@@ -277,17 +277,6 @@ export default function Home() {
                 <p className="font-mono text-muted-foreground text-sm mt-1">{t.title}</p>
               </div>
             </div>
-            
-            <div className="flex shrink-0">
-              <a 
-                href={`https://wa.me/5511945549000?text=${encodeURIComponent("Olá! Gostaria de agendar uma reunião sem compromisso para conhecer os serviços da Vanguard Web Studio.")}`} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold px-6 py-3 rounded-xl shadow-[0_0_20px_rgba(var(--primary),0.3)] hover:shadow-[0_0_30px_rgba(var(--primary),0.5)] transition-all flex items-center text-sm"
-              >
-                <MessageCircle className="w-4 h-4 mr-2" /> Reunião sem compromisso
-              </a>
-            </div>
           </header>
 
           <Card className="backdrop-blur-xl bg-black/40 border border-white/20 rounded-3xl shadow-2xl overflow-hidden">

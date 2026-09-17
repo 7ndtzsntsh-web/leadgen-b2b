@@ -175,25 +175,22 @@ export async function GET(req: NextRequest) {
           let rawResults: any[] = [];
           const needed = volume - totalValidStreamed;
 
-          // Etapa 1: Coletar batch de leads brutos desta cidade (pega a mais para suprir descartes)
+          // Pipeline Híbrido: Coleta e Validação em Streaming Contínuo
           if (GOOGLE_API_KEY) {
-            sendEvent({ type: 'info', message: `Minerando em paralelo [${termsToSearch.length}] sub-nichos em ${currentLoc.city}...` });
+            sendEvent({ type: 'info', message: `Mapeando micro-zonas e sub-nichos em ${currentLoc.city}...` });
 
             const fetchTasks: (() => Promise<void>)[] = [];
             
             for (const qZone of currentLoc.queries) {
-              if (rawResults.length >= needed * 3) break;
-              
-              // Dispara todas as variações semânticas em paralelo
               for (const nicheTerm of termsToSearch) {
                 fetchTasks.push(async () => {
-                  if (rawResults.length >= needed * 15) return;
+                  if (totalValidStreamed >= volume) return;
                   const query = `${nicheTerm} in ${qZone}`;
                   let nextPageToken = undefined;
                   let pagesFetched = 0;
 
-                  while (pagesFetched < 3) {
-                    if (rawResults.length >= needed * 15) break;
+                  while (pagesFetched < 2) { // 2 páginas rápidas por micro-nicho para fluidez
+                    if (totalValidStreamed >= volume) break;
                     const gRes: Response = await fetch('https://places.googleapis.com/v1/places:searchText', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_API_KEY, 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,places.primaryType,nextPageToken' },
@@ -230,125 +227,78 @@ export async function GET(req: NextRequest) {
                     nextPageToken = data.nextPageToken;
                     pagesFetched++;
                     if (!nextPageToken) break;
-                    await new Promise(r => setTimeout(r, 1000));
+                    await new Promise(r => setTimeout(r, 600)); // Delay menor para velocidade
                   }
                 });
               }
             }
             
-            // Chunk processing to avoid rate limits & connection dropping
-            const batchSize = 5;
-            for (let i = 0; i < fetchTasks.length; i += batchSize) {
-              if (rawResults.length >= needed * 15) break;
-              const batch = fetchTasks.slice(i, i + batchSize);
+            // Pular processamento de chunks para streaming imediato
+            const fetchBatchSize = 4;
+            for (let i = 0; i < fetchTasks.length; i += fetchBatchSize) {
+              if (totalValidStreamed >= volume) break;
+              
+              sendEvent({ type: 'info', message: `Minerando quadrantes [Lote ${Math.floor(i/fetchBatchSize)+1}/${Math.ceil(fetchTasks.length/fetchBatchSize)}] em ${currentLoc.city}...` });
+              
+              const batch = fetchTasks.slice(i, i + fetchBatchSize);
               await Promise.all(batch.map(fn => fn()));
+
+              // VALIDAÇÃO EM TEMPO REAL: Esvazia rawResults e valida o que acabou de ser puxado!
+              if (rawResults.length > 0) {
+                const unvalidated = rawResults.splice(0, rawResults.length).filter(l => l.name !== 'Estabelecimento Local');
+                unvalidated.sort((a, b) => b.reviewsCount - a.reviewsCount);
+
+                const valBatchSize = 25;
+                for (let j = 0; j < unvalidated.length; j += valBatchSize) {
+                  if (totalValidStreamed >= volume) break;
+                  
+                  sendEvent({ type: 'info', message: `Validando contatos de ${currentLoc.city}... [${totalValidStreamed}/${volume} limpos]` });
+
+                  const vBatch = unvalidated.slice(j, j + valBatchSize);
+                  await Promise.all(vBatch.map(async (rawLead) => {
+                    if (totalValidStreamed >= volume) return; 
+
+                    let siteStatus: DomainStatus | 'Sem Site' = 'Sem Site';
+                    let email = 'N/D';
+
+                    if (rawLead.website) {
+                      siteStatus = await validateDomain(rawLead.website);
+                      if (siteStatus === 'SSL Válido' || siteStatus === 'HTTP Inseguro') {
+                        email = await extractEmail(rawLead.website);
+                      }
+                    }
+
+                    if (rawLead.phone === 'Não informado' && email === 'N/D') return;
+
+                    const phoneType = getPhoneType(rawLead.phone, country);
+                    
+                    let score = 0;
+                    if (siteStatus === 'Sem Site') score += 50;
+                    if (siteStatus === 'HTTP Inseguro') score += 40;
+                    if (siteStatus === 'Erro 404/Inativo') score += 60;
+                    if (Number(rawLead.rating) < 4.0 && Number(rawLead.rating) > 0) score += 20;
+                    if (rawLead.phone !== 'Não informado') score += 10;
+                    if (email !== 'N/D') score += 10;
+                    if (phoneType === 'MOBILE') score += 5;
+                    if (rawLead.reviewsCount > 100) score += 10;
+
+                    totalValidStreamed++;
+                    sendEvent({ 
+                      type: 'lead', 
+                      data: {
+                        ...rawLead,
+                        siteStatus,
+                        email,
+                        phoneType,
+                        score: Math.min(score, 100)
+                      } 
+                    });
+                  }));
+                }
+              }
             }
           } else {
-            // NOMINATIM FALLBACK (Sequential to avoid rate limit)
-            sendEvent({ type: 'info', message: `Minerando sequencialmente [${termsToSearch.length}] sub-nichos em ${currentLoc.city} (Fallback)...` });
-            const limitPerTerm = Math.ceil((needed * 3) / (termsToSearch.length * currentLoc.queries.length));
-            for (const qZone of currentLoc.queries) {
-              if (rawResults.length >= needed * 3) break;
-              for (const t of termsToSearch) {
-                if (rawResults.length >= needed * 3) break;
-                const q = `${t} ${qZone}`.trim();
-                const nomRes: Response = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&extratags=1&limit=${Math.max(10, limitPerTerm)}`, {
-                  headers: { 'User-Agent': 'LeadGenPro-B2B-App/5.0' }
-                });
-
-                if (nomRes.ok) {
-                  const data: any = await nomRes.json();
-                  for (const p of data) {
-                    const tags = p.extratags || {};
-                    const rawPhone = tags.phone || tags['contact:phone'] || tags['contact:whatsapp'] || 'Não informado';
-                    const phone = cleanPhone(rawPhone, country, currentLoc.city);
-                    
-                    if (!seenIds.has(p.osm_id) && !(phone !== 'Não informado' && seenPhones.has(phone))) {
-                      seenIds.add(p.osm_id);
-                      if (phone !== 'Não informado') seenPhones.add(phone);
-                      rawResults.push({
-                        id: p.osm_id.toString(),
-                        name: p.name || tags.brand || 'Estabelecimento Local',
-                        category: (p.type || t).replace(/_/g, ' '),
-                        phone: phone,
-                        address: p.display_name,
-                        rating: (3.5 + Math.random() * 1.5).toFixed(1),
-                        reviewsCount: Math.floor(Math.random() * 200) + 5,
-                        website: tags.website || tags['contact:website'] || tags.url,
-                        isExpansion: currentLoc.isExpansion,
-                        expansionSource: currentLoc.city
-                      });
-                    }
-                  }
-                }
-                await new Promise(r => setTimeout(r, 1000));
-              }
-            }
-          }
-
-          rawResults = rawResults.filter(l => l.name !== 'Estabelecimento Local');
-          
-          // Ordena crus priorizando os mais aquecidos (com mais avaliações) para tentar validar primeiro os melhores
-          rawResults.sort((a, b) => b.reviewsCount - a.reviewsCount);
-
-          if (rawResults.length > 0) {
-            sendEvent({ type: 'info', message: `Analisando contatos e sites de ${rawResults.length} locais em ${currentLoc.city}...` });
-          }
-
-          // Etapa 2: Validar contatos e Streaming (DESCARTANDO OS INÚTEIS)
-          const batchSize = 25; // Máxima agilidade no Edge Runtime
-          for (let i = 0; i < rawResults.length; i += batchSize) {
-            if (totalValidStreamed >= volume) break;
-            
-            // UI Progress Indicator Real-Time
-            sendEvent({ type: 'info', message: `Verificando contatos e sites de ${currentLoc.city}... [${totalValidStreamed}/${volume} leads validados]` });
-
-            const batch = rawResults.slice(i, i + batchSize);
-            
-            await Promise.all(batch.map(async (rawLead) => {
-              // Previne race conditions se o batch estourar o volume simultaneamente
-              if (totalValidStreamed >= volume) return; 
-
-              let siteStatus: DomainStatus | 'Sem Site' = 'Sem Site';
-              let email = 'N/D';
-
-              if (rawLead.website) {
-                siteStatus = await validateDomain(rawLead.website);
-                if (siteStatus === 'SSL Válido' || siteStatus === 'HTTP Inseguro') {
-                  email = await extractEmail(rawLead.website);
-                }
-              }
-
-              // REGRA DE OURO: ZERO LEADS INÚTEIS
-              // Se não tem telefone NEM e-mail, é descartado silenciosamente e não contabiliza na meta.
-              if (rawLead.phone === 'Não informado' && email === 'N/D') {
-                return;
-              }
-
-              const phoneType = getPhoneType(rawLead.phone, country);
-              
-              let score = 0;
-              if (siteStatus === 'Sem Site') score += 50;
-              if (siteStatus === 'HTTP Inseguro') score += 40;
-              if (siteStatus === 'Erro 404/Inativo') score += 60;
-              if (Number(rawLead.rating) < 4.0 && Number(rawLead.rating) > 0) score += 20;
-              if (rawLead.phone !== 'Não informado') score += 10;
-              if (email !== 'N/D') score += 10;
-              if (phoneType === 'MOBILE') score += 5;
-              if (rawLead.reviewsCount > 100) score += 10; // Bônus pra volume alto de clientes
-
-              totalValidStreamed++;
-              sendEvent({ 
-                type: 'lead', 
-                data: {
-                  ...rawLead,
-                  siteStatus,
-                  email,
-                  phoneType,
-                  score: Math.min(score, 100)
-                } 
-              });
-            }));
+            sendEvent({ type: 'info', message: `Por favor, insira a chave da API do Google para mineração profunda.` });
           }
         } // Fim do Loop Estrito
 
