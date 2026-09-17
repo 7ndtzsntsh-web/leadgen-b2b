@@ -144,10 +144,11 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       const sendEvent = (data: any) => {
-        try { controller.enqueue(`data: ${JSON.stringify(data)}\n\n`); } catch (e) {}
+        try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); } catch (e) {}
       };
 
       sendEvent({ type: 'info', message: `Meta de ${volume} leads ativada para ${termsToSearch[0]}...` });
@@ -174,14 +175,14 @@ export async function GET(req: NextRequest) {
           if (GOOGLE_API_KEY) {
             sendEvent({ type: 'info', message: `Minerando em paralelo [${termsToSearch.length}] sub-nichos em ${currentLoc.city}...` });
 
-            const fetchPromises: Promise<void>[] = [];
+            const fetchTasks: (() => Promise<void>)[] = [];
             
             for (const qZone of currentLoc.queries) {
               if (rawResults.length >= needed * 3) break;
               
               // Dispara todas as variações semânticas em paralelo
               for (const nicheTerm of termsToSearch) {
-                fetchPromises.push((async () => {
+                fetchTasks.push(async () => {
                   const query = `${nicheTerm} in ${qZone}`;
                   let nextPageToken = undefined;
                   let pagesFetched = 0;
@@ -225,11 +226,16 @@ export async function GET(req: NextRequest) {
                     if (!nextPageToken) break;
                     await new Promise(r => setTimeout(r, 1000));
                   }
-                })());
+                });
               }
             }
             
-            await Promise.all(fetchPromises);
+            // Chunk processing to avoid rate limits & connection dropping
+            const batchSize = 5;
+            for (let i = 0; i < fetchTasks.length; i += batchSize) {
+              const batch = fetchTasks.slice(i, i + batchSize);
+              await Promise.all(batch.map(fn => fn()));
+            }
           } else {
             // NOMINATIM FALLBACK (Sequential to avoid rate limit)
             sendEvent({ type: 'info', message: `Minerando sequencialmente [${termsToSearch.length}] sub-nichos em ${currentLoc.city} (Fallback)...` });
