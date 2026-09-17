@@ -94,8 +94,12 @@ export default function Home() {
         setStatusMessage(parsed.message);
       } else if (parsed.type === 'lead') {
         const newLead = parsed.data as Lead;
-        if (noSite && newLead.siteStatus !== 'Sem Site') return;
-        if (insecure && newLead.siteStatus !== 'HTTP Inseguro' && newLead.siteStatus !== 'Erro 404/Inativo') return;
+        if (noSite || insecure) {
+          let pass = false;
+          if (noSite && newLead.siteStatus === 'Sem Site') pass = true;
+          if (insecure && (newLead.siteStatus === 'HTTP Inseguro' || newLead.siteStatus === 'Erro 404/Inativo')) pass = true;
+          if (!pass) return;
+        }
         
         setLeads(prev => {
           if (prev.some(l => l.id === newLead.id)) return prev;

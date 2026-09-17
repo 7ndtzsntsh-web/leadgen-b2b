@@ -187,7 +187,7 @@ export async function GET(req: NextRequest) {
               for (const nicheTerm of termsToSearch) {
                 fetchTasks.push(async () => {
                   if (totalValidStreamed >= volume) return;
-                  const query = `${nicheTerm} in ${qZone}`;
+                  const query = `${nicheTerm} ${qZone}`.trim();
                   let nextPageToken = undefined;
                   let pagesFetched = 0;
 
@@ -322,7 +322,7 @@ export async function GET(req: NextRequest) {
               for (const t of termsToSearch) {
                 if (totalValidStreamed >= volume) break;
                 
-                const q = `${t} in ${qZone}`.trim();
+                const q = `${t} ${qZone}`.trim();
                 sendEvent({ type: 'info', message: `Minerando quadrante via Nominatim: ${q}...` });
                 
                 try {
