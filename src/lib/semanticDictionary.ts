@@ -88,7 +88,8 @@ export function getExpansionCities(canonicalCity: string, ufSigla?: string): str
   if (ufSigla) {
     return [
       `${canonicalCity} e Região, ${ufSigla}`,
-      `Estado de ${ufSigla}`
+      `Estado de ${ufSigla}`,
+      `${ufSigla} Capital e Interior`
     ];
   }
 

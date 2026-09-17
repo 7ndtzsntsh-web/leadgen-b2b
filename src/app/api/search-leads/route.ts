@@ -136,7 +136,7 @@ export async function GET(req: NextRequest) {
       locationQueue.push({
         city: exp,
         isExpansion: true,
-        queries: getCityZones(exp, country).slice(0, 3) // Foca nos centros/norte/sul das vizinhas
+        queries: getCityZones(exp, country) // Foca em todas as zonas comerciais das vizinhas
       });
     }
   } else {
