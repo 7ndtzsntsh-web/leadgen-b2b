@@ -81,9 +81,18 @@ export function getValidDDDs(cityInput: string): string[] | null {
   return null;
 }
 
-export function getExpansionCities(canonicalCity: string): string[] {
+export function getExpansionCities(canonicalCity: string, ufSigla?: string): string[] {
   // Retorna os polos vizinhos em ordem de relevância comercial
-  return expansionMap[canonicalCity] || [
+  if (expansionMap[canonicalCity]) return expansionMap[canonicalCity];
+  
+  if (ufSigla) {
+    return [
+      `${canonicalCity} e Região, ${ufSigla}`,
+      `Estado de ${ufSigla}`
+    ];
+  }
+
+  return [
     `Região Metropolitana de ${canonicalCity}`,
     `Estado de ${canonicalCity}`
   ];

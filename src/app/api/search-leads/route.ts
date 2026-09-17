@@ -116,7 +116,9 @@ export async function GET(req: NextRequest) {
 
   const termsToSearch = expandSearchTerm(term, country);
   // Se a cidade vier do autocomplete IBGE (ex: "Campinas - SP"), extrai só o nome principal
-  const cleanedCity = rawCity.split(' - ')[0].trim();
+  const parts = rawCity.split(' - ');
+  const cleanedCity = parts[0].trim();
+  const ufSigla = parts.length > 1 ? parts[1].trim() : '';
   const canonicalCity = expandCity(cleanedCity);
   
   // Fila Dinâmica de Cidades
@@ -129,7 +131,7 @@ export async function GET(req: NextRequest) {
       queries: getCityZones(canonicalCity, country)
     });
     
-    const expansions = getExpansionCities(canonicalCity);
+    const expansions = getExpansionCities(canonicalCity, ufSigla);
     for (const exp of expansions) {
       locationQueue.push({
         city: exp,
@@ -185,11 +187,13 @@ export async function GET(req: NextRequest) {
               // Dispara todas as variações semânticas em paralelo
               for (const nicheTerm of termsToSearch) {
                 fetchTasks.push(async () => {
+                  if (rawResults.length >= needed * 15) return;
                   const query = `${nicheTerm} in ${qZone}`;
                   let nextPageToken = undefined;
                   let pagesFetched = 0;
 
                   while (pagesFetched < 3) {
+                    if (rawResults.length >= needed * 15) break;
                     const gRes: Response = await fetch('https://places.googleapis.com/v1/places:searchText', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_API_KEY, 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,places.primaryType,nextPageToken' },
@@ -235,6 +239,7 @@ export async function GET(req: NextRequest) {
             // Chunk processing to avoid rate limits & connection dropping
             const batchSize = 5;
             for (let i = 0; i < fetchTasks.length; i += batchSize) {
+              if (rawResults.length >= needed * 15) break;
               const batch = fetchTasks.slice(i, i + batchSize);
               await Promise.all(batch.map(fn => fn()));
             }
@@ -291,7 +296,7 @@ export async function GET(req: NextRequest) {
           }
 
           // Etapa 2: Validar contatos e Streaming (DESCARTANDO OS INÚTEIS)
-          const batchSize = 15; // Aumentado para máxima agilidade
+          const batchSize = 25; // Máxima agilidade no Edge Runtime
           for (let i = 0; i < rawResults.length; i += batchSize) {
             if (totalValidStreamed >= volume) break;
             
