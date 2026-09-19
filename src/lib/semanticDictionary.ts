@@ -1,122 +1,112 @@
-export const semanticDictionary: Record<string, Record<string, string[]>> = {
-  "padaria": { "br": ["padaria", "panificadora", "confeitaria", "cafeteria", "boulangerie"], "us": ["bakery", "pastry shop", "boulangerie", "bread shop", "cafe"], "es": ["panadería", "pastelería", "confitería", "cafetería"], "pt": ["padaria", "pastelaria", "confeitaria", "cafetaria"] },
-  "restaurante": { "br": ["restaurante", "lanchonete", "bistrô", "pizzaria", "hamburgueria", "churrascaria"], "us": ["restaurant", "diner", "bistro", "pizzeria", "burger joint", "steakhouse"], "es": ["restaurante", "cafetería", "bistró", "pizzería", "hamburguesería", "asador"], "pt": ["restaurante", "snack-bar", "bistrô", "pizzaria", "churrasqueira"] },
-  "açougue": { "br": ["açougue", "casa de carnes", "boutique de carnes", "frigorífico"], "us": ["butcher", "butcher shop", "meat market"], "es": ["carnicería", "charcutería", "mercado de carnes"], "pt": ["talho", "carnificina", "casa de carnes"] },
-  "supermercado": { "br": ["supermercado", "mercado", "mercearia", "minimercado", "hortifruti"], "us": ["supermarket", "grocery store", "market", "convenience store", "produce market"], "es": ["supermercado", "mercado", "tienda de abarrotes", "frutería"], "pt": ["supermercado", "mercado", "mercearia", "minimercado"] },
-  "clínica": { "br": ["clínica", "consultório", "policlínica", "centro médico", "hospital"], "us": ["clinic", "medical office", "medical center", "health center"], "es": ["clínica", "consultorio", "policlínica", "centro médico"], "pt": ["clínica", "consultório", "centro médico"] },
-  "odontologia": { "br": ["odontologia", "dentista", "clínica odontológica", "ortodontia", "implantes"], "us": ["dentist", "dental clinic", "orthodontist", "dental care"], "es": ["odontología", "dentista", "clínica dental", "ortodoncia"], "pt": ["medicina dentária", "dentista", "clínica dentária", "ortodontia"] },
-  "estética": { "br": ["estética", "centro de estética", "spa", "clínica de beleza", "harmonização facial", "biomedicina estética", "depilação a laser"], "us": ["aesthetic clinic", "beauty salon", "spa", "laser hair removal"], "es": ["estética", "centro de estética", "spa", "clínica de belleza"], "pt": ["estética", "centro de estética", "spa", "clínica de beleza"] },
-  "salão": { "br": ["salão de beleza", "cabeleireiro", "barbearia", "esmalteria", "studio de beleza"], "us": ["beauty salon", "hair salon", "barbershop", "nail salon"], "es": ["salón de belleza", "peluquería", "barbería", "salón de uñas"], "pt": ["salão de beleza", "cabeleireiro", "barbearia"] },
-  "advocacia": { "br": ["advocacia", "escritório de advocacia", "advogado", "jurídico"], "us": ["law firm", "lawyer", "attorney", "legal services"], "es": ["abogado", "bufete de abogados", "despacho de abogados"], "pt": ["escritório de advogados", "advocacia", "advogado"] },
-  "oficina": { "br": ["oficina mecânica", "auto center", "mecânica", "funilaria", "centro automotivo", "borracharia", "autopeças"], "us": ["auto repair", "mechanic", "auto shop", "body shop"], "es": ["taller mecánico", "mecánico", "taller de autos", "chapa y pintura"], "pt": ["oficina mecânica", "mecânico", "bate-chapas"] },
-  "imobiliária": { "br": ["imobiliária", "corretor de imóveis", "venda de imóveis", "incorporadora"], "us": ["real estate", "realtor", "property management", "real estate agency"], "es": ["inmobiliaria", "bienes raíces", "agente inmobiliario"], "pt": ["imobiliária", "agência imobiliária", "mediador imobiliário"] },
-  "energia solar": { "br": ["energia solar", "painel solar", "energia fotovoltaica", "instalador solar", "engenharia elétrica"], "us": ["solar energy", "solar panel", "photovoltaic", "solar installer"], "es": ["energía solar", "panel solar", "fotovoltaica", "instalador solar"], "pt": ["energia solar", "painel solar", "energia fotovoltaica"] },
-  "serralheria": { "br": ["serralheria", "estruturas metálicas", "portões de alumínio", "vidraçaria", "soldador", "esquadrias"], "us": ["locksmith", "metal structures", "metalworking", "welder"], "es": ["cerrajería", "estructuras metálicas", "vidriería", "soldador"], "pt": ["serralharia", "estruturas metálicas", "soldador"] },
-  "usinagem": { "br": ["usinagem", "tornearia", "corte a laser", "metalúrgica", "ferramentaria", "caldeiraria", "cnc"], "us": ["machining", "metalworking", "laser cutting", "cnc machining"], "es": ["mecanizado", "metalurgia", "corte láser"], "pt": ["usinagem", "metalúrgica", "corte a laser"] },
-  "logística": { "br": ["logística", "transportadora", "frete", "distribuidora", "armazém", "galpão logístico"], "us": ["logistics", "freight", "transportation", "warehouse"], "es": ["logística", "transporte", "distribuidora"], "pt": ["logística", "transportadora", "armazém"] },
-  "contabilidade": { "br": ["contabilidade", "escritório contábil", "contador", "assessoria contábil"], "us": ["accounting", "cpa", "bookkeeping", "accountant"], "es": ["contabilidad", "contador", "asesoría contable"], "pt": ["contabilidade", "gabinete de contabilidade", "contabilista"] }
+import { normalizeText } from "./text";
+
+type Lang = "br" | "us" | "es" | "pt";
+
+export const semanticDictionary: Record<string, Partial<Record<Lang, string[]>>> = {
+  "padaria": { br: ["padaria", "panificadora", "confeitaria", "cafeteria", "boulangerie"], us: ["bakery", "pastry shop", "boulangerie", "bread shop", "cafe"], es: ["panadería", "pastelería", "confitería", "cafetería"], pt: ["padaria", "pastelaria", "confeitaria", "cafetaria"] },
+  "restaurante": { br: ["restaurante", "lanchonete", "bistrô", "pizzaria", "hamburgueria", "churrascaria"], us: ["restaurant", "diner", "bistro", "pizzeria", "burger joint", "steakhouse"], es: ["restaurante", "cafetería", "bistró", "pizzería", "hamburguesería", "asador"], pt: ["restaurante", "snack-bar", "bistrô", "pizzaria", "churrasqueira"] },
+  "açougue": { br: ["açougue", "casa de carnes", "boutique de carnes"], us: ["butcher", "butcher shop", "meat market"], es: ["carnicería", "charcutería", "mercado de carnes"], pt: ["talho", "carnificina", "casa de carnes"] },
+  "supermercado": { br: ["supermercado", "mercado", "mercearia", "minimercado", "hortifruti"], us: ["supermarket", "grocery store", "market", "convenience store", "produce market"], es: ["supermercado", "mercado", "tienda de abarrotes", "frutería"], pt: ["supermercado", "mercado", "mercearia", "minimercado"] },
+  "clínica": { br: ["clínica", "consultório", "policlínica", "centro médico"], us: ["clinic", "medical office", "medical center", "health center"], es: ["clínica", "consultorio", "policlínica", "centro médico"], pt: ["clínica", "consultório", "centro médico"] },
+  "odontologia": { br: ["odontologia", "dentista", "clínica odontológica", "ortodontia", "implantes"], us: ["dentist", "dental clinic", "orthodontist", "dental care"], es: ["odontología", "dentista", "clínica dental", "ortodoncia"], pt: ["medicina dentária", "dentista", "clínica dentária", "ortodontia"] },
+  "estética": { br: ["estética", "centro de estética", "spa", "clínica de beleza", "harmonização facial", "biomedicina estética", "depilação a laser"], us: ["aesthetic clinic", "beauty salon", "spa", "laser hair removal"], es: ["estética", "centro de estética", "spa", "clínica de belleza"], pt: ["estética", "centro de estética", "spa", "clínica de beleza"] },
+  "salão": { br: ["salão de beleza", "cabeleireiro", "barbearia", "esmalteria", "studio de beleza"], us: ["beauty salon", "hair salon", "barbershop", "nail salon"], es: ["salón de belleza", "peluquería", "barbería", "salón de uñas"], pt: ["salão de beleza", "cabeleireiro", "barbearia"] },
+  "advocacia": { br: ["advocacia", "escritório de advocacia", "advogado", "jurídico"], us: ["law firm", "lawyer", "attorney", "legal services"], es: ["abogado", "bufete de abogados", "despacho de abogados"], pt: ["escritório de advogados", "advocacia", "advogado"] },
+  "oficina": { br: ["oficina mecânica", "auto center", "mecânica", "funilaria", "centro automotivo", "borracharia", "autopeças"], us: ["auto repair", "mechanic", "auto shop", "body shop"], es: ["taller mecánico", "mecánico", "taller de autos", "chapa y pintura"], pt: ["oficina mecânica", "mecânico", "bate-chapas"] },
+  "imobiliária": { br: ["imobiliária", "corretor de imóveis", "venda de imóveis", "incorporadora"], us: ["real estate", "realtor", "property management", "real estate agency"], es: ["inmobiliaria", "bienes raíces", "agente inmobiliario"], pt: ["imobiliária", "agência imobiliária", "mediador imobiliário"] },
+  "energia solar": { br: ["energia solar", "painel solar", "energia fotovoltaica", "instalador solar", "engenharia elétrica"], us: ["solar energy", "solar panel", "photovoltaic", "solar installer"], es: ["energía solar", "panel solar", "fotovoltaica", "instalador solar"], pt: ["energia solar", "painel solar", "energia fotovoltaica"] },
+  "serralheria": { br: ["serralheria", "estruturas metálicas", "portões de alumínio", "vidraçaria", "soldador", "esquadrias"], us: ["locksmith", "metal structures", "metalworking", "welder"], es: ["cerrajería", "estructuras metálicas", "vidriería", "soldador"], pt: ["serralharia", "estruturas metálicas", "soldador"] },
+  "usinagem": { br: ["usinagem", "tornearia", "corte a laser", "metalúrgica", "ferramentaria", "caldeiraria", "cnc"], us: ["machining", "metalworking", "laser cutting", "cnc machining"], es: ["mecanizado", "metalurgia", "corte láser"], pt: ["usinagem", "metalúrgica", "corte a laser"] },
+  "logística": { br: ["logística", "transportadora", "frete", "distribuidora", "armazém", "galpão logístico"], us: ["logistics", "freight", "transportation", "warehouse"], es: ["logística", "transporte", "distribuidora"], pt: ["logística", "transportadora", "armazém"] },
+  "contabilidade": { br: ["contabilidade", "escritório contábil", "contador", "assessoria contábil"], us: ["accounting", "cpa", "bookkeeping", "accountant"], es: ["contabilidad", "contador", "asesoría contable"], pt: ["contabilidade", "gabinete de contabilidade", "contabilista"] },
+
+  // Nichos adicionados (antes só o termo digitado era pesquisado, sem sinônimos)
+  "veterinária": { br: ["clínica veterinária", "veterinário", "hospital veterinário", "banho e tosa"], us: ["veterinarian", "vet clinic", "animal hospital", "pet grooming"], es: ["veterinaria", "clínica veterinaria", "peluquería canina"] },
+  "pet shop": { br: ["pet shop", "banho e tosa", "agropecuária", "casa de ração"], us: ["pet store", "pet grooming", "pet supplies"], es: ["tienda de mascotas", "peluquería canina"] },
+  "academia": { br: ["academia", "crossfit", "estúdio de pilates", "personal trainer", "studio de treinamento"], us: ["gym", "fitness center", "crossfit", "pilates studio"], es: ["gimnasio", "crossfit", "estudio de pilates"] },
+  "psicologia": { br: ["psicólogo", "clínica de psicologia", "psicoterapia", "terapeuta"], us: ["psychologist", "therapist", "counseling"], es: ["psicólogo", "terapeuta", "clínica de psicología"] },
+  "fisioterapia": { br: ["fisioterapia", "clínica de fisioterapia", "fisioterapeuta", "quiropraxia"], us: ["physical therapy", "physiotherapist", "chiropractor"], es: ["fisioterapia", "fisioterapeuta", "quiropráctico"] },
+  "nutrição": { br: ["nutricionista", "clínica de nutrição", "nutrição esportiva"], us: ["nutritionist", "dietitian"], es: ["nutricionista", "dietista"] },
+  "escola": { br: ["escola", "escola de idiomas", "curso de inglês", "escola infantil", "reforço escolar", "cursos profissionalizantes"], us: ["school", "language school", "tutoring", "preschool"], es: ["escuela", "academia de idiomas", "guardería"] },
+  "autoescola": { br: ["autoescola", "centro de formação de condutores"], us: ["driving school"], es: ["autoescuela"] },
+  "hotel": { br: ["hotel", "pousada", "hostel", "chalé"], us: ["hotel", "inn", "hostel", "bed and breakfast"], es: ["hotel", "posada", "hostal"] },
+  "construção": { br: ["construtora", "empreiteira", "materiais de construção", "engenharia civil", "reformas"], us: ["construction company", "general contractor", "building supplies", "remodeling"], es: ["constructora", "materiales de construcción", "reformas"] },
+  "arquitetura": { br: ["escritório de arquitetura", "arquiteto", "design de interiores", "paisagismo"], us: ["architect", "interior designer", "landscaping"], es: ["estudio de arquitectura", "arquitecto", "diseño de interiores"] },
+  "marcenaria": { br: ["marcenaria", "móveis planejados", "carpintaria", "móveis sob medida"], us: ["carpentry", "custom furniture", "cabinet maker"], es: ["carpintería", "muebles a medida"] },
+  "móveis": { br: ["loja de móveis", "móveis planejados", "decoração", "colchões"], us: ["furniture store", "home decor", "mattress store"], es: ["tienda de muebles", "decoración", "colchones"] },
+  "lavanderia": { br: ["lavanderia", "tinturaria", "lavagem a seco"], us: ["laundromat", "dry cleaner", "laundry service"], es: ["lavandería", "tintorería"] },
+  "estética automotiva": { br: ["estética automotiva", "lava jato", "lava rápido", "polimento", "martelinho de ouro", "película automotiva"], us: ["car wash", "auto detailing", "window tinting"], es: ["lavado de autos", "detailing", "polarizado"] },
+  "gráfica": { br: ["gráfica", "comunicação visual", "impressão", "serigrafia"], us: ["print shop", "signs", "screen printing"], es: ["imprenta", "rotulación", "serigrafía"] },
+  "fotografia": { br: ["fotógrafo", "estúdio fotográfico", "filmagem"], us: ["photographer", "photo studio", "videographer"], es: ["fotógrafo", "estudio fotográfico", "videógrafo"] },
+  "eventos": { br: ["buffet", "assessoria de eventos", "salão de festas", "decoração de festas"], us: ["event planner", "catering", "party venue"], es: ["organizador de eventos", "catering", "salón de fiestas"] },
+  "farmácia": { br: ["farmácia", "drogaria", "farmácia de manipulação"], us: ["pharmacy", "drugstore", "compounding pharmacy"], es: ["farmacia", "droguería"] },
+  "ótica": { br: ["ótica", "óculos", "lentes de contato"], us: ["optical shop", "optometrist", "eyeglasses"], es: ["óptica", "gafas", "optometrista"] },
+  "floricultura": { br: ["floricultura", "loja de flores", "garden center"], us: ["florist", "flower shop", "garden center"], es: ["floristería", "vivero"] },
+  "segurança": { br: ["segurança eletrônica", "empresa de segurança", "câmeras de segurança", "alarmes", "portaria"], us: ["security company", "alarm systems", "cctv installation"], es: ["seguridad electrónica", "alarmas", "cámaras de seguridad"] },
+  "dedetização": { br: ["dedetizadora", "controle de pragas", "desentupidora", "limpeza de caixa d'água"], us: ["pest control", "exterminator", "drain cleaning"], es: ["control de plagas", "fumigación"] },
+  "ar condicionado": { br: ["ar condicionado", "refrigeração", "manutenção de ar condicionado", "climatização"], us: ["hvac", "air conditioning repair", "refrigeration"], es: ["aire acondicionado", "refrigeración", "climatización"] },
+  "manutenção residencial": { br: ["eletricista", "encanador", "pintor", "reformas", "marido de aluguel"], us: ["electrician", "plumber", "painter", "handyman"], es: ["electricista", "plomero", "pintor", "reformas"] },
+  "assistência técnica": { br: ["assistência técnica", "conserto de celular", "manutenção de computadores", "informática"], us: ["phone repair", "computer repair", "electronics repair"], es: ["servicio técnico", "reparación de celulares", "informática"] },
+  "moda": { br: ["loja de roupas", "boutique", "moda feminina", "moda masculina", "confecção", "calçados"], us: ["clothing store", "boutique", "shoe store", "fashion"], es: ["tienda de ropa", "boutique", "zapatería", "moda"] },
+  "telhado": { br: ["telhadista", "coberturas e telhados", "calhas e rufos", "impermeabilização", "reforma de telhado"], us: ["roofing contractor", "roofer", "gutter installation", "waterproofing"], es: ["techador", "cubiertas", "impermeabilización"] },
 };
 
-const cityAliases: Record<string, string> = {
-  "sp": "São Paulo", "sampa": "São Paulo", "rj": "Rio de Janeiro", "floripa": "Florianópolis",
-  "bh": "Belo Horizonte", "bsb": "Brasília", "df": "Brasília", "cwb": "Curitiba",
-  "poa": "Porto Alegre", "ssa": "Salvador", "nyc": "New York", "ny": "New York",
-  "la": "Los Angeles", "cdmx": "Ciudad de México", "lisboa": "Lisbon", "porto": "Oporto"
+const LANG_FALLBACK: Record<Lang, Lang[]> = {
+  br: ["br"],
+  pt: ["pt", "br", "us"],
+  es: ["es", "us"],
+  us: ["us"],
 };
 
-// Cidades altamente densas e econômicas ao redor dos grandes centros
-const expansionMap: Record<string, string[]> = {
-  "São Paulo": ["Guarulhos", "Campinas", "Osasco", "Santo André", "São Bernardo do Campo", "São Caetano do Sul", "Diadema", "Barueri", "Sorocaba", "Jundiaí", "Ribeirão Preto", "São José dos Campos", "Santos", "Mauá", "Mogi das Cruzes"],
-  "Rio de Janeiro": ["Niterói", "Duque de Caxias", "Nova Iguaçu", "São Gonçalo", "Petrópolis", "Cabo Frio", "Volta Redonda", "Macaé", "Campos dos Goytacazes", "Belford Roxo"],
-  "Florianópolis": ["São José", "Palhoça", "Biguaçu", "Balneário Camboriú", "Itajaí", "Blumenau", "Joinville", "Criciúma", "Tubarão", "Lages", "Chapecó", "Brusque"],
-  "Belo Horizonte": ["Contagem", "Betim", "Nova Lima", "Uberlândia", "Juiz de Fora", "Ipatinga", "Sete Lagoas", "Divinópolis", "Governador Valadares", "Montes Claros", "Uberaba"],
-  "Curitiba": ["São José dos Pinhais", "Londrina", "Maringá", "Ponta Grossa", "Cascavel", "Colombo", "Foz do Iguaçu", "Guarapuava", "Paranaguá"],
-  "Brasília": ["Taguatinga", "Águas Claras", "Goiânia", "Anápolis", "Aparecida de Goiânia", "Luziânia", "Rio Verde", "Valparaíso de Goiás"],
-  "Porto Alegre": ["Caxias do Sul", "Canoas", "Novo Hamburgo", "Pelotas", "Santa Maria", "São Leopoldo", "Rio Grande", "Passo Fundo", "Gravataí", "Viamão"],
-  "Salvador": ["Lauro de Freitas", "Camaçari", "Feira de Santana", "Vitória da Conquista", "Itabuna", "Ilhéus", "Juazeiro", "Jequié"],
-  "Recife": ["Jaboatão dos Guararapes", "Olinda", "Caruaru", "Paulista", "Petrolina", "Cabo de Santo Agostinho", "Camaragibe", "Garanhuns"],
-  "Fortaleza": ["Caucaia", "Maracanaú", "Sobral", "Juazeiro do Norte", "Crato", "Itapipoca", "Maranguape"],
-  "New York": ["Brooklyn", "Queens", "Jersey City", "Newark", "Yonkers", "Hoboken", "White Plains", "Stamford", "Hempstead"],
-  "Los Angeles": ["Long Beach", "Anaheim", "Santa Ana", "Irvine", "Glendale", "Pasadena", "Huntington Beach", "Riverside"],
-  "Miami": ["Fort Lauderdale", "Boca Raton", "West Palm Beach", "Hollywood", "Pompano Beach", "Coral Springs", "Miami Beach"],
-  "Lisbon": ["Sintra", "Cascais", "Amadora", "Oeiras", "Loures", "Almada", "Odivelas", "Seixal", "Vila Franca de Xira"],
-  "Oporto": ["Vila Nova de Gaia", "Matosinhos", "Maia", "Gondomar", "Braga", "Guimarães", "Santa Maria da Feira"],
-  "Ciudad de México": ["Naucalpan", "Tlalnepantla", "Ecatepec", "Nezahualcóyotl", "Toluca", "Chimalhuacán", "Cuautitlán Izcalli"]
+const COUNTRY_LANG: Record<string, Lang> = {
+  us: "us", ca: "us", uk: "us", es: "es", mx: "es", ar: "es", co: "es", pt: "pt", br: "br",
 };
 
-export function expandCity(cityInput: string): string {
-  const normalized = cityInput.toLowerCase().trim();
-  return cityAliases[normalized] || cityInput;
-}
-
-// Mapeamento de DDDs válidos por estado/cidade para blindar dados geográficos no Brasil
-const dddMap: Record<string, string[]> = {
-  "são paulo": ["11", "12", "13", "14", "15", "16", "17", "18", "19"],
-  "guarulhos": ["11"], "campinas": ["19"], "osasco": ["11"], "santo andré": ["11"], "são bernardo do campo": ["11"], "sorocaba": ["15"],
-  "rio de janeiro": ["21", "22", "24"], "niterói": ["21"],
-  "florianópolis": ["48"], "são josé": ["48"], "palhoça": ["48"], "balneário camboriú": ["47"], "blumenau": ["47"], "joinville": ["47"], "criciúma": ["48"], "santa catarina": ["47", "48", "49"],
-  "belo horizonte": ["31"], "minas gerais": ["31", "32", "33", "34", "35", "37", "38"],
-  "curitiba": ["41"], "paraná": ["41", "42", "43", "44", "45", "46"],
-  "brasília": ["61"], "goiânia": ["62"], "goiás": ["61", "62", "64"],
-  "porto alegre": ["51"], "rio grande do sul": ["51", "53", "54", "55"],
-  "salvador": ["71"], "bahia": ["71", "73", "74", "75", "77"],
-  "recife": ["81"], "pernambuco": ["81", "87"],
-  "fortaleza": ["85"], "ceará": ["85", "88"]
-};
-
-export function getValidDDDs(cityInput: string): string[] | null {
-  const normalized = cityInput.toLowerCase().trim();
-  
-  // Tenta achar direto pelo nome da cidade ou estado
-  if (dddMap[normalized]) return dddMap[normalized];
-  
-  // Tenta achar se o nome mapeado contém a palavra (ex: buscar "São Paulo" dentro da chave)
-  for (const [key, ddds] of Object.entries(dddMap)) {
-    if (normalized.includes(key) || key.includes(normalized)) {
-      return ddds;
+// Índice normalizado (sem acento/maiúscula) → chave do dicionário. Só entram a chave e o nome principal
+// (1º termo) de cada idioma, ex.: "salão de beleza", "oficina mecânica", "bakery". Os demais sinônimos
+// ("barbearia", "dentista") são nichos mais específicos e devem ser pesquisados literalmente.
+const TERM_INDEX: Map<string, string> = (() => {
+  const index = new Map<string, string>();
+  for (const key of Object.keys(semanticDictionary)) index.set(normalizeText(key), key);
+  for (const [key, langs] of Object.entries(semanticDictionary)) {
+    for (const list of Object.values(langs)) {
+      const canonical = list?.[0];
+      if (canonical && !index.has(normalizeText(canonical))) index.set(normalizeText(canonical), key);
     }
   }
-  
-  // Se não tem regra mapeada para a cidade, retorna null para ignorar a trava e ser flexível
-  return null;
+  return index;
+})();
+
+/** Remove plural simples ("dentistas", "padarias") para achar a chave. */
+function singular(word: string): string {
+  return word.length > 4 && word.endsWith("s") ? word.slice(0, -1) : word;
 }
 
-export function getExpansionCities(canonicalCity: string, ufSigla?: string): string[] {
-  // Retorna os polos vizinhos em ordem de relevância comercial
-  if (expansionMap[canonicalCity]) return expansionMap[canonicalCity];
-  
-  if (ufSigla) {
-    return [
-      `${canonicalCity} e Região, ${ufSigla}`,
-      `Estado de ${ufSigla}`,
-      `${ufSigla} Capital e Interior`
-    ];
-  }
-
-  return [
-    `Região Metropolitana de ${canonicalCity}`,
-    `Estado de ${canonicalCity}`
-  ];
+export function findDictionaryKey(term: string): string | undefined {
+  const norm = normalizeText(term);
+  return TERM_INDEX.get(norm) ?? TERM_INDEX.get(singular(norm));
 }
 
-export function expandSearchTerm(term: string, country: string = 'br'): string[] {
-  const normalizedTerm = term.toLowerCase().trim();
-  const matchedKey = Object.keys(semanticDictionary).find(key => 
-    key === normalizedTerm || key.includes(normalizedTerm) || normalizedTerm.includes(key)
-  );
+/**
+ * Expande o nicho digitado em termos de busca.
+ * O casamento é exato (ignorando acento e plural). Antes era "contém a palavra", e por isso
+ * "clínica veterinária" virava "clínica médica / hospital" e "restaurante japonês" virava pizzaria e churrascaria.
+ * Termos específicos não listados são pesquisados exatamente como digitados.
+ */
+export function expandSearchTerm(term: string, country: string = "br"): string[] {
+  const typed = term.trim().replace(/\s+/g, " ");
+  const expanded = new Set<string>([typed.toLowerCase()]);
 
-  let expanded = new Set<string>();
-  expanded.add(normalizedTerm);
-
-  const langMap: Record<string, string> = {
-    'us': 'us', 'ca': 'us', 'uk': 'us', 'es': 'es', 'mx': 'es', 'ar': 'es', 'co': 'es', 'pt': 'pt', 'br': 'br'
-  };
-  const mappedLang = langMap[country] || 'us';
-
-  if (matchedKey && semanticDictionary[matchedKey][mappedLang]) {
-    semanticDictionary[matchedKey][mappedLang].forEach(synonym => expanded.add(synonym));
-  } else if (matchedKey && semanticDictionary[matchedKey]['us']) {
-    semanticDictionary[matchedKey]['us'].forEach(synonym => expanded.add(synonym));
+  const key = findDictionaryKey(typed);
+  if (key) {
+    const lang = COUNTRY_LANG[country] ?? "us";
+    for (const candidate of LANG_FALLBACK[lang]) {
+      const synonyms = semanticDictionary[key][candidate];
+      if (synonyms) {
+        synonyms.forEach((s) => expanded.add(s));
+        break;
+      }
+    }
   }
 
   return Array.from(expanded);
@@ -129,7 +119,7 @@ export const uiTranslations: Record<string, Record<string, string>> = {
     nichePlaceholder: "Qualquer nicho (Ex: Padaria, Usinagem, TI)",
     city: "Região / Cidade (Opcional)",
     cityPlaceholder: "Ex: SP, Floripa, RJ ou Brasil",
-    onlyNoSite: "Apenas S/ Site",
+    onlyNoSite: "Sem site (ou só Instagram / fora do ar)",
     onlyInsecure: "Apenas Inseguros",
     volume: "Meta de Leads",
     buttonSearch: "Disparar Mineração",
@@ -144,7 +134,7 @@ export const uiTranslations: Record<string, Record<string, string>> = {
     nichePlaceholder: "Ex: Pastelaria, TI, Usinagem",
     city: "Região / Cidade (Opcional)",
     cityPlaceholder: "Ex: Lisboa, Porto ou Portugal",
-    onlyNoSite: "Apenas S/ Site",
+    onlyNoSite: "Sem site (ou só redes sociais / fora do ar)",
     onlyInsecure: "Apenas Inseguros",
     volume: "Meta de Leads",
     buttonSearch: "Iniciar Mineração",
@@ -159,7 +149,7 @@ export const uiTranslations: Record<string, Record<string, string>> = {
     nichePlaceholder: "Any niche (e.g., Bakery, IT, Machining)",
     city: "Region / City (Optional)",
     cityPlaceholder: "e.g., NYC, LA, Texas or USA",
-    onlyNoSite: "No Website Only",
+    onlyNoSite: "No website (or social-only / down)",
     onlyInsecure: "Insecure (HTTP) Only",
     volume: "Lead Quota",
     buttonSearch: "Start Mining",
@@ -174,7 +164,7 @@ export const uiTranslations: Record<string, Record<string, string>> = {
     nichePlaceholder: "Cualquier nicho (Ej: Panadería, TI, Mecanizado)",
     city: "Región / Ciudad (Opcional)",
     cityPlaceholder: "Ej: CDMX, Madrid",
-    onlyNoSite: "Solo Sin Web",
+    onlyNoSite: "Sin web (o solo redes / caída)",
     onlyInsecure: "Solo Inseguros",
     volume: "Meta de Leads",
     buttonSearch: "Iniciar Prospección",

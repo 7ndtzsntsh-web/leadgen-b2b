@@ -1,28 +1,12 @@
 import type { NextConfig } from "next";
 
-const cspHeader = `
-  default-src 'self';
-  script-src 'self' 'unsafe-inline' 'unsafe-eval';
-  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-  img-src 'self' data: https: blob:;
-  font-src 'self' data: https://fonts.gstatic.com;
-  connect-src 'self' https:;
-  object-src 'none';
-  base-uri 'self';
-  frame-ancestors 'none';
-  frame-src 'self' https://www.google.com https://maps.google.com;
-`;
-
+// A Content-Security-Policy (com nonce por requisição) é definida em src/proxy.ts.
 const nextConfig: NextConfig = {
   async headers() {
     return [
       {
         source: '/(.*)',
         headers: [
-          {
-            key: 'Content-Security-Policy',
-            value: cspHeader.replace(/\n/g, ''),
-          },
           {
             key: 'Strict-Transport-Security',
             value: 'max-age=63072000; includeSubDomains; preload',
