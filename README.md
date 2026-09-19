@@ -49,7 +49,10 @@ Todo deploy deve passar nos 12 testes do [MDN HTTP Observatory](https://develope
 - **Antes de publicar:** `npm run build && npm start` e, em outro terminal, `npm run security:scan`. Ele roda o scanner oficial do MDN no servidor local e falha (código 1) se algum teste reprovar.
 - **Depois de publicar:** confirme o domínio real na página do Observatório.
 - O servidor só consulta sites públicos (bloqueio de SSRF em `src/lib/domainValidator.ts`, inclusive em redirecionamentos).
-- ⚠️ `/api/search-leads` gasta a cota paga do Google Places. Se o site for público, restrinja a chave à API Places (New) e defina cota diária e alerta de orçamento no Google Cloud.
+- **Proteção das APIs (`src/lib/apiGuard.ts`):** em produção `/api/search-leads` e `/api/cities` só aceitam chamadas feitas pelo próprio site (`Sec-Fetch-Site`), com limite de 20 buscas por 10 min e 2 simultâneas por visitante. É proteção "melhor esforço" (memória da instância).
+- **Violações de CSP** enviadas pelos navegadores são registradas nos logs da Vercel (`[csp-violation]`, rota `/api/csp-report`).
+- Headers: sem `X-Powered-By`, `Permissions-Policy` fechada, CORP `same-origin`. `public/.well-known/security.txt` indica como reportar vulnerabilidades e `.github/dependabot.yml` abre PRs de atualização de dependências.
+- ⚠️ `/api/search-leads` gasta a cota paga do Google Places. Restrinja a chave à API Places (New) e defina cota diária e alerta de orçamento no Google Cloud: é o limite firme, independente do código.
 
 ## 🚀 Deploy e Automação Git
 

@@ -7,6 +7,7 @@ import { expandSearchTerm } from '@/lib/semanticDictionary';
 import { resolveLocations, type SearchLocation } from '@/lib/locations';
 import { inspectWebsite } from '@/lib/domainValidator';
 import { AsyncQueue, runPool } from '@/lib/async';
+import { acquireSlot, guardApi } from '@/lib/apiGuard';
 import { normalizeText } from '@/lib/text';
 import { NO_PHONE, cleanPhone, getPhoneType, matchesSiteFilters, pickWhatsApp, scoreLead, type SiteStatus } from '@/lib/leadRules';
 
@@ -24,6 +25,9 @@ const REGION: Record<string, string> = { br: 'BR', pt: 'PT', us: 'US', es: 'ES' 
 
 const MAX_VOLUME = 300;
 const MAX_INPUT_LENGTH = 100;     // nicho e cidade: limita o tamanho do que vira consulta paga ao Google
+const SEARCH_LIMIT = 20;          // buscas por visitante (IP) ...
+const SEARCH_WINDOW_MS = 10 * 60_000; // ... a cada 10 minutos
+const MAX_CONCURRENT_SEARCHES = 2;    // buscas simultâneas por visitante
 const FETCH_CONCURRENCY = 6;      // consultas simultâneas ao Google
 const VALIDATE_CONCURRENCY = 12;  // sites verificados ao mesmo tempo
 const MAX_PAGES = 3;              // o Google entrega até 3 páginas (60 resultados) por consulta
@@ -288,7 +292,25 @@ async function collectFromNominatim(ctx: MiningContext, queue: AsyncQueue<RawLea
 // Handler
 // ---------------------------------------------------------------------------
 
+/** Aviso que a tela mostra normalmente (evento `error` do stream), em vez de um erro de conexão genérico. */
+function streamNotice(message: string, retryAfterSec?: number): Response {
+  return new Response(`data: ${JSON.stringify({ type: 'error', message })}\n\n`, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-store',
+      ...(retryAfterSec ? { 'Retry-After': String(retryAfterSec) } : {}),
+    },
+  });
+}
+
 export async function GET(req: NextRequest) {
+  // Só o próprio site pode chamar (em produção) e há limite por visitante: cada busca gasta a cota paga do Google.
+  const guard = guardApi(req, 'search', SEARCH_LIMIT, SEARCH_WINDOW_MS);
+  if (!guard.ok) {
+    if (guard.reason === 'forbidden') return new Response('Acesso negado', { status: 403, headers: { 'Cache-Control': 'no-store' } });
+    return streamNotice(`Muitas buscas em pouco tempo. Tente novamente em ${Math.ceil(guard.retryAfterSec / 60)} min.`, guard.retryAfterSec);
+  }
+
   const params = req.nextUrl.searchParams;
   const term = (params.get('category') || '').trim().slice(0, MAX_INPUT_LENGTH);
   if (!term) return new Response('Parâmetro category é obrigatório', { status: 400 });
@@ -300,6 +322,9 @@ export async function GET(req: NextRequest) {
   const volume = Math.min(Math.max(Number.isFinite(requestedVolume) ? requestedVolume : 50, 1), MAX_VOLUME);
   const onlyNoSite = params.get('noSite') === 'true';
   const onlyInsecure = params.get('insecure') === 'true';
+
+  const releaseSlot = acquireSlot(req, 'search', MAX_CONCURRENT_SEARCHES);
+  if (!releaseSlot) return streamNotice('Você já tem buscas em andamento. Aguarde terminar ou interrompa uma delas.');
 
   const terms = expandSearchTerm(term, country);
   const locations = resolveLocations(rawCity, country);
@@ -376,6 +401,7 @@ export async function GET(req: NextRequest) {
         ctx.send({ type: 'error', message: 'Ocorreu um erro na mineração.' });
       } finally {
         clearInterval(heartbeat);
+        releaseSlot();
         try { controller.close(); } catch { /* já encerrado pelo cliente */ }
       }
     },

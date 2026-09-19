@@ -30,6 +30,9 @@ export function proxy(request: NextRequest) {
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
+    // Violações reais (em navegadores de verdade) chegam em /api/csp-report e ficam nos logs da Vercel.
+    'report-uri /api/csp-report',
+    'report-to csp-endpoint',
     ...(isDev ? [] : ['upgrade-insecure-requests']),
   ].join('; ');
 
@@ -39,6 +42,7 @@ export function proxy(request: NextRequest) {
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set('Content-Security-Policy', csp);
+  response.headers.set('Reporting-Endpoints', 'csp-endpoint="/api/csp-report"');
   return response;
 }
 
