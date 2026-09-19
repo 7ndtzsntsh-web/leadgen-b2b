@@ -248,7 +248,9 @@ async function collectFromGoogle(ctx: MiningContext, queue: AsyncQueue<RawLead>,
 // ---------------------------------------------------------------------------
 
 async function collectFromNominatim(ctx: MiningContext, queue: AsyncQueue<RawLead>, loc: SearchLocation, terms: string[]): Promise<void> {
-  for (const zone of loc.queries) {
+  // O Nominatim aceita só 1 consulta por segundo e não entende "Zona Norte, Cidade": só a cidade inteira (1ª consulta)
+  // traz resultados. Repetir cada termo em várias zonas só multiplicava a espera (20 s+ por cidade pequena).
+  for (const zone of loc.queries.slice(0, 1)) {
     for (const term of terms) {
       if (ctx.isDone()) return;
       try {
