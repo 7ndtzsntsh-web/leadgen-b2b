@@ -1,0 +1,4 @@
+Contact: https://github.com/7ndtzsntsh-web/leadgen-b2b/security/advisories/new
+Expires: 2027-09-19T00:00:00.000Z
+Preferred-Languages: pt, en
+Canonical: https://leadgen-b2b-fqbz.vercel.app/.well-known/security.txt

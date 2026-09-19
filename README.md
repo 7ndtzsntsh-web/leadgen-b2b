@@ -36,6 +36,24 @@ cp .env.example .env
 ```
 _(Consulte o arquivo `.env.example` para ver quais variáveis são necessárias caso expanda a API)._
 
+## 🔎 Como a busca funciona
+- **Nichos:** o termo digitado é expandido só quando é o nome principal de um nicho do dicionário (`src/lib/semanticDictionary.ts`, ignora acentos e plural). Termos específicos (ex.: "restaurante japonês") são pesquisados exatamente como digitados.
+- **Cidades:** a fila começa na cidade pedida e, se a meta não for atingida, expande para as cidades vizinhas da mesma região do IBGE, das mais populosas para as menos (`src/lib/locations.ts`). A base de cidades é gerada por `node scripts/build-br-cities.mjs`.
+- **Verificação do site:** uma única passada (HTTPS e HTTP em paralelo) classifica como `SSL Válido`, `HTTP Inseguro`, `Erro 404/Inativo`, `Só Rede Social` ou `Sem Site`. Respostas 401/403/405 (site que bloqueia robôs) contam como site no ar.
+- **Filtro "Sem site":** inclui empresas sem site, só com Instagram/Facebook/link na bio e com site fora do ar.
+- **Pontuação (`src/lib/leadRules.ts`):** prioriza quem não tem site funcionando, é bem avaliado (tem clientes e verba), tem celular (WhatsApp) e e-mail. Empresas fechadas e redes/franquias (mesmo nome 3+ vezes) são descartadas.
+
+## 🔒 Segurança (padrão MDN HTTP Observatory, meta A+)
+Todo deploy deve passar nos 12 testes do [MDN HTTP Observatory](https://developer.mozilla.org/en-US/observatory).
+- **CSP estrita com nonce** em `src/proxy.ts` (sem `unsafe-inline`/`unsafe-eval` em produção, `object-src 'none'`). Outros headers em `next.config.ts` (HSTS com preload, `X-Frame-Options`, `nosniff`, COOP/CORP, `Referrer-Policy`).
+- **Antes de publicar:** `npm run build && npm start` e, em outro terminal, `npm run security:scan`. Ele roda o scanner oficial do MDN no servidor local e falha (código 1) se algum teste reprovar.
+- **Depois de publicar:** confirme o domínio real na página do Observatório.
+- O servidor só consulta sites públicos (bloqueio de SSRF em `src/lib/domainValidator.ts`, inclusive em redirecionamentos).
+- **Proteção das APIs (`src/lib/apiGuard.ts`):** em produção `/api/search-leads` e `/api/cities` só aceitam chamadas feitas pelo próprio site (`Sec-Fetch-Site`), com limite de 20 buscas por 10 min e 2 simultâneas por visitante. É proteção "melhor esforço" (memória da instância).
+- **Violações de CSP** enviadas pelos navegadores são registradas nos logs da Vercel (`[csp-violation]`, rota `/api/csp-report`).
+- Headers: sem `X-Powered-By`, `Permissions-Policy` fechada, CORP `same-origin`. `public/.well-known/security.txt` indica como reportar vulnerabilidades e `.github/dependabot.yml` abre PRs de atualização de dependências.
+- ⚠️ `/api/search-leads` gasta a cota paga do Google Places. Restrinja a chave à API Places (New) e defina cota diária e alerta de orçamento no Google Cloud: é o limite firme, independente do código.
+
 ## 🚀 Deploy e Automação Git
 
 Para subir este projeto para o GitHub via terminal:

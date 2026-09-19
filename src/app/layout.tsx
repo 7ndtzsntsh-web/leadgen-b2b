@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import { Inter, Playfair_Display, Roboto_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -51,21 +52,20 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // O nonce do CSP (src/proxy.ts) é novo a cada requisição, então a página precisa ser renderizada sob demanda.
+  await connection();
+  // O fundo com imagem do Unsplash (2850px + blur em tela cheia) ficava 100% coberto pelo fundo opaco da página,
+  // mas era baixado e renderizado mesmo assim. Removido: pesava no celular e não aparecia.
   return (
     <html lang="pt-BR" className="dark">
       <body
         className={`${inter.variable} ${playfair.variable} ${robotoMono.variable} antialiased min-h-screen relative font-sans`}
       >
-        {/* Background cinemático full-bleed */}
-        <div className="fixed inset-0 z-[-1]">
-          <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&q=80&w=2850')] bg-cover bg-center" />
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
-        </div>
         {children}
       </body>
     </html>

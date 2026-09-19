@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Search, MapPin, Download, CheckCircle2, Play, MessageCircle, Phone, FileText, Copy, Star, LayoutDashboard, Settings, Mail } from "lucide-react";
+import { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Search, MapPin, Download, CheckCircle2, Play, MessageCircle, Phone, FileText, Copy, Star, LayoutDashboard, Settings, Mail, Check } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,42 +10,286 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { DomainStatus } from "@/lib/domainValidator";
-import { uiTranslations } from "@/lib/semanticDictionary";
+import { NO_PHONE, callOf, internationalNumber, matchesSiteFilters, whatsappOf, type Lead } from "@/lib/leadRules";
+import { semanticDictionary, uiTranslations } from "@/lib/semanticDictionary";
+import { buildPitch, pitchLangFor } from "@/lib/pitches";
 
-export interface Lead {
-  id: string;
-  name: string;
-  category: string;
-  phone: string;
-  email: string;
-  siteStatus: DomainStatus | 'Sem Site';
-  address: string;
-  rating: number;
-  reviewsCount: number;
-  score: number;
-  website?: string;
-  phoneType?: 'MOBILE' | 'LANDLINE' | 'UNKNOWN';
-  isExpansion?: boolean;
-  expansionSource?: string;
+const DESKTOP_QUERY = "(min-width: 768px)";
+const FLUSH_INTERVAL_MS = 300;
+
+/** Só monta a versão (cards ou tabela) que cabe na tela. Antes as duas eram renderizadas e uma ficava escondida. */
+function useIsDesktop(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const media = window.matchMedia(DESKTOP_QUERY);
+      media.addEventListener("change", onChange);
+      return () => media.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(DESKTOP_QUERY).matches,
+    () => false
+  );
 }
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Fallback para navegadores/contextos sem a Clipboard API.
+    try {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(area);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+const getSiteStatusColor = (status: string) => {
+  switch (status) {
+    case "Sem Site": return "bg-destructive/20 text-destructive border-destructive/30";
+    case "Só Rede Social": return "bg-pink-500/20 text-pink-400 border-pink-500/30";
+    case "HTTP Inseguro": return "bg-orange-500/20 text-orange-500 border-orange-500/30";
+    case "Erro 404/Inativo": return "bg-yellow-500/15 text-yellow-400 border-yellow-500/30";
+    case "SSL Válido": return "bg-green-500/20 text-green-500 border-green-500/30";
+    default: return "bg-secondary text-secondary-foreground";
+  }
+};
+
+/** O site vem de dados de terceiros: só http/https viram link (impede `javascript:` e similares). */
+function safeHref(website: string): string | undefined {
+  try {
+    const url = new URL(/^https?:\/\//i.test(website) ? website : `http://${website}`);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const csvCell = (value: string | number | undefined): string => {
+  let text = String(value ?? "");
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`; // evita fórmula ao abrir no Excel/Sheets
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
+interface LeadItemProps {
+  lead: Lead;
+  copied: boolean;
+  onCopy: (lead: Lead) => void;
+  onWhatsApp: (lead: Lead) => void;
+  onCall: (lead: Lead) => void;
+}
+
+/**
+ * O WhatsApp tem prioridade: `wpp` é o número que abre no WhatsApp (o achado no site, ou o próprio telefone
+ * se for celular) e `call` é o número para ligar (fixo, ou outro telefone). `plain` é o telefone comum a exibir.
+ */
+function contactOf(lead: Lead) {
+  const wpp = whatsappOf(lead);
+  const call = callOf(lead);
+  const plain = call ?? (!lead.whatsapp && lead.phone !== NO_PHONE ? lead.phone : undefined);
+  return { wpp, call, plain };
+}
+
+const LeadCard = memo(function LeadCard({ lead, copied, onCopy, onWhatsApp, onCall }: LeadItemProps) {
+  const { wpp, call, plain } = contactOf(lead);
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-3 relative overflow-hidden">
+      {lead.isExpansion && <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>}
+      <div>
+        <div className="font-medium text-white text-lg flex items-center gap-2">{lead.name}</div>
+        <div className="text-xs text-muted-foreground mt-1">{lead.category}</div>
+        {lead.isExpansion && <div className="text-[10px] text-indigo-400 mt-1">🚀 EXPANSÃO: {lead.expansionSource}</div>}
+      </div>
+
+      <div className="flex flex-col gap-1 text-sm text-gray-300">
+        {lead.whatsapp && <div className="flex items-center gap-2 text-[#25D366]"><MessageCircle className="w-3 h-3" /> {lead.whatsapp}</div>}
+        {plain && <div className="flex items-center gap-2"><Phone className="w-3 h-3 text-muted-foreground" /> {plain}</div>}
+        {lead.email !== "N/D" && <div className="flex items-center gap-2"><Mail className="w-3 h-3 text-muted-foreground" /> <span className="truncate">{lead.email}</span></div>}
+        <div className="flex items-center gap-2"><MapPin className="w-3 h-3 text-muted-foreground flex-shrink-0" /> <span className="truncate">{lead.address}</span></div>
+      </div>
+
+      <div className="flex items-center justify-between pt-2 border-t border-white/10">
+        <Badge variant="outline" className={`${getSiteStatusColor(lead.siteStatus)} font-mono text-[10px] uppercase`}>{lead.siteStatus}</Badge>
+        <div className="flex items-center gap-3">
+          {lead.rating > 0 && (
+            <div className="flex items-center gap-1">
+              <Star className="w-3 h-3 text-yellow-500 fill-current" />
+              <span className="text-xs text-yellow-500">{Number(lead.rating).toFixed(1)}</span>
+            </div>
+          )}
+          <span className="text-xs font-mono text-muted-foreground">score {lead.score}</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 mt-1">
+        <Button variant="outline" className="bg-white/5 border-white/10 text-xs h-10" onClick={() => onCopy(lead)}>
+          {copied ? <Check className="w-3 h-3 mr-1" /> : <Copy className="w-3 h-3 mr-1" />} {copied ? "Copiado" : "Copiar"}
+        </Button>
+        {wpp && (
+          <Button variant="default" className="bg-[#25D366]/20 text-[#25D366] border-[#25D366]/50 text-xs h-10" onClick={() => onWhatsApp(lead)}>
+            <MessageCircle className="w-3 h-3 mr-1" /> WPP
+          </Button>
+        )}
+        {call && (
+          <Button variant="default" className={`bg-blue-600/20 text-blue-400 border-blue-500/50 text-xs h-10 ${wpp ? "col-span-2" : ""}`} onClick={() => onCall(lead)}>
+            <Phone className="w-3 h-3 mr-1" /> Ligar
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+});
+
+const LeadRow = memo(function LeadRow({ lead, copied, onCopy, onWhatsApp, onCall }: LeadItemProps) {
+  const { wpp, call, plain } = contactOf(lead);
+  return (
+    <TableRow className={`border-white/10 hover:bg-white/5 transition-colors group ${lead.isExpansion ? "bg-indigo-900/10" : ""}`}>
+      <TableCell>
+        <div className="font-medium text-white group-hover:text-primary transition-colors flex flex-wrap items-center gap-2">
+          {lead.name}
+          <Badge variant="outline" className="bg-green-500/10 text-green-400 border-green-500/30 text-[9px] px-1 uppercase whitespace-nowrap flex items-center gap-1">
+            <CheckCircle2 className="w-3 h-3" /> VERIFICADO
+          </Badge>
+          {lead.isExpansion && (
+            <Badge variant="outline" className="bg-indigo-500/10 text-indigo-400 border-indigo-500/30 text-[9px] px-1 uppercase whitespace-nowrap">
+              🚀 EXPANSÃO: {lead.expansionSource}
+            </Badge>
+          )}
+        </div>
+        <div className="text-[10px] uppercase font-mono tracking-wider text-muted-foreground mt-1 mb-1">{lead.category}</div>
+
+        <div className="flex flex-col gap-1 mt-2">
+          {lead.whatsapp && (
+            <div className="text-sm font-mono text-white flex items-center">
+              <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/30 text-[9px] mr-2 px-1">WPP</Badge>
+              {lead.whatsapp}
+            </div>
+          )}
+          {plain && (
+            <div className="text-sm font-mono text-white flex items-center">
+              {lead.phoneType === "MOBILE" && !lead.whatsapp ? (
+                <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/30 text-[9px] mr-2 px-1">WPP</Badge>
+              ) : lead.phoneType === "LANDLINE" ? (
+                <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/30 text-[9px] mr-2 px-1">FIXO</Badge>
+              ) : null}
+              {plain}
+            </div>
+          )}
+        </div>
+
+        <div className="text-xs text-muted-foreground flex items-center mt-2">
+          <MapPin className="w-3 h-3 mr-1 opacity-70 flex-shrink-0" />
+          <span className="truncate max-w-[200px] block" title={lead.address}>{lead.address}</span>
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-col gap-1">
+          {lead.email !== "N/D" ? (
+            <div className="text-xs text-muted-foreground truncate max-w-[180px]" title={lead.email}>📧 {lead.email}</div>
+          ) : (
+            <div className="text-xs text-muted-foreground/50 italic">📧 Sem E-mail detectado</div>
+          )}
+
+          {lead.website ? (
+            <a
+              className="text-xs text-blue-400 truncate max-w-[180px] hover:underline"
+              href={safeHref(lead.website)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              🌐 {lead.website}
+            </a>
+          ) : (
+            <div className="text-xs text-muted-foreground/50 italic">🌐 Nenhum domínio detectado</div>
+          )}
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-col items-start gap-2">
+          <Badge variant="outline" className={`${getSiteStatusColor(lead.siteStatus)} font-mono text-[10px] uppercase`}>
+            {lead.siteStatus}
+          </Badge>
+          {lead.rating > 0 && (
+            <div className="flex items-center text-xs text-yellow-500 bg-yellow-500/10 px-2 py-0.5 rounded-full border border-yellow-500/20">
+              <Star className="w-3 h-3 mr-1 fill-current" />
+              {Number(lead.rating).toFixed(1)} <span className="text-muted-foreground ml-1">({lead.reviewsCount})</span>
+            </div>
+          )}
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-2">
+          <div className="bg-white/10 rounded-full h-1.5 overflow-hidden w-16">
+            <div
+              className={`h-full ${lead.score > 80 ? "bg-green-500" : lead.score > 50 ? "bg-yellow-500" : "bg-red-500"}`}
+              style={{ width: `${lead.score}%` }}
+            />
+          </div>
+          <span className="text-xs font-mono text-muted-foreground">{lead.score}</span>
+        </div>
+      </TableCell>
+      <TableCell className="text-right">
+        <div className="flex flex-col gap-2 items-end">
+          <Button
+            variant="outline" size="sm"
+            className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white transition-all text-[10px] h-7 w-24 flex justify-between"
+            onClick={() => onCopy(lead)}
+          >
+            {copied ? "Copiado!" : "Copiar Pitch"}
+            {copied ? <Check className="w-3 h-3 ml-1" /> : <Copy className="w-3 h-3 ml-1" />}
+          </Button>
+
+          {wpp && (
+            <Button
+              variant="default" size="sm"
+              className="bg-[#25D366]/20 text-[#25D366] border border-[#25D366]/50 hover:bg-[#25D366] hover:text-white transition-all shadow-[0_0_10px_rgba(37,211,102,0.1)] hover:shadow-[0_0_20px_rgba(37,211,102,0.4)] text-[10px] h-7 w-24 flex justify-between"
+              onClick={() => onWhatsApp(lead)}
+            >
+              WhatsApp
+              <MessageCircle className="w-3 h-3 ml-1" />
+            </Button>
+          )}
+          {call && (
+            <Button
+              variant="default" size="sm"
+              className="bg-blue-600/20 text-blue-400 border border-blue-500/50 hover:bg-blue-600 hover:text-white transition-all text-[10px] h-7 w-24 flex justify-between"
+              onClick={() => onCall(lead)}
+            >
+              Ligar
+              <Phone className="w-3 h-3 ml-1" />
+            </Button>
+          )}
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+});
 
 export default function Home() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const [ibgeCities, setIbgeCities] = useState<string[]>([]);
+  const [toast, setToast] = useState("");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
 
-  useEffect(() => {
-    fetch('https://servicodados.ibge.gov.br/api/v1/localidades/municipios')
-      .then(res => res.json())
-      .then(data => {
-        setIbgeCities(data.map((m: any) => `${m.nome} - ${m.microrregiao.mesorregiao.UF.sigla}`));
-      })
-      .catch(() => {});
-  }, []);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const resultsRef = useRef<HTMLDivElement | null>(null);
+  const bufferRef = useRef<Lead[]>([]);
+  const flushTimerRef = useRef<number | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const copiedTimerRef = useRef<number | null>(null);
+
+  const isDesktop = useIsDesktop();
 
   // Filtros
   const [category, setCategory] = useState("");
@@ -57,25 +301,90 @@ export default function Home() {
 
   const t = uiTranslations[country] || uiTranslations["br"];
 
-  const stopSearch = () => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
+  // Autocomplete de cidades: consulta só as sugestões que casam (antes baixava os 5.571 municípios do IBGE
+  // e montava 5.571 opções na tela, o que travava o celular).
+  const cityQuery = city.split(" - ")[0].trim();
+  const canSuggest = country === "br" && cityQuery.length >= 2 && !city.includes(" - ");
+  useEffect(() => {
+    if (!canSuggest) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      fetch(`/api/cities?q=${encodeURIComponent(cityQuery)}`, { signal: controller.signal })
+        .then((res) => (res.ok ? res.json() : []))
+        .then((list: string[]) => setCitySuggestions(Array.isArray(list) ? list : []))
+        .catch(() => {});
+    }, 200);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [canSuggest, cityQuery]);
+  const shownSuggestions = canSuggest ? citySuggestions : [];
+
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(""), 2200);
+  }, []);
+
+  // Os leads chegam um a um; agrupar em lotes evita renderizar a lista inteira a cada lead (pesado no celular).
+  const flushLeads = useCallback((sortByScore = false) => {
+    if (flushTimerRef.current !== null) {
+      window.clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
     }
+    const batch = bufferRef.current;
+    bufferRef.current = [];
+    if (batch.length === 0 && !sortByScore) return;
+    setLeads((prev) => {
+      const seen = new Set(prev.map((l) => l.id));
+      const merged = [...prev, ...batch.filter((l) => !seen.has(l.id))];
+      // Durante a busca a ordem fica estável (a lista não "pula" sob o dedo); ao final ordena por score.
+      return sortByScore ? merged.sort((a, b) => b.score - a.score) : merged;
+    });
+  }, []);
+
+  const queueLead = useCallback((lead: Lead) => {
+    bufferRef.current.push(lead);
+    if (flushTimerRef.current === null) {
+      flushTimerRef.current = window.setTimeout(() => flushLeads(false), FLUSH_INTERVAL_MS);
+    }
+  }, [flushLeads]);
+
+  const closeStream = useCallback(() => {
+    eventSourceRef.current?.close();
+    eventSourceRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      eventSourceRef.current?.close();
+      if (flushTimerRef.current) window.clearTimeout(flushTimerRef.current);
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
+
+  const stopSearch = () => {
+    closeStream();
+    flushLeads(true);
     setLoading(false);
-    setStatusMessage(t.buttonStop + "...");
+    setStatusMessage(t.buttonStop);
   };
 
   const startSearch = () => {
     if (!category.trim()) {
-      alert("Por favor, informe ao menos o Nicho/Segmento.");
+      showToast("Informe ao menos o Nicho/Segmento.");
       return;
     }
-    
+
+    closeStream();
+    bufferRef.current = [];
     setLeads([]);
     setLoading(true);
     setHasSearched(true);
-    setStatusMessage("Connecting...");
+    setStatusMessage("Conectando...");
+    if (!isDesktop) resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
     const params = new URLSearchParams();
     params.append("category", category);
@@ -88,173 +397,126 @@ export default function Home() {
     const sse = new EventSource(`/api/search-leads?${params.toString()}`);
     eventSourceRef.current = sse;
 
-    sse.onmessage = (e) => {
-      const parsed = JSON.parse(e.data);
-      if (parsed.type === 'info') {
-        setStatusMessage(parsed.message);
-      } else if (parsed.type === 'lead') {
-        const newLead = parsed.data as Lead;
-        if (noSite || insecure) {
-          let pass = false;
-          if (noSite && newLead.siteStatus === 'Sem Site') pass = true;
-          if (insecure && (newLead.siteStatus === 'HTTP Inseguro' || newLead.siteStatus === 'Erro 404/Inativo')) pass = true;
-          if (!pass) return;
-        }
-        
-        setLeads(prev => {
-          if (prev.some(l => l.id === newLead.id)) return prev;
-          const updated = [...prev, newLead];
-          return updated.sort((a, b) => b.score - a.score);
-        });
-      } else if (parsed.type === 'done' || parsed.type === 'error') {
-        sse.close();
-        setLoading(false);
-        setStatusMessage(parsed.message);
-      }
-    };
-
-    sse.onerror = (err) => {
-      console.error("SSE Error:", err);
+    const finish = (message: string) => {
       sse.close();
+      if (eventSourceRef.current === sse) eventSourceRef.current = null;
+      flushLeads(true);
       setLoading(false);
-      setStatusMessage("Erro de conexão com o servidor. Verifique os logs.");
-      alert("A conexão com o servidor falhou ou foi interrompida.");
+      setStatusMessage(message);
+    };
+
+    sse.onmessage = (e) => {
+      let parsed: { type: string; message?: string; data?: Lead };
+      try {
+        parsed = JSON.parse(e.data);
+      } catch {
+        return;
+      }
+      if (parsed.type === "info" && parsed.message) {
+        setStatusMessage(parsed.message);
+      } else if (parsed.type === "lead" && parsed.data) {
+        const lead = parsed.data;
+        if (matchesSiteFilters(lead.siteStatus, noSite, insecure)) queueLead(lead);
+      } else if (parsed.type === "done" || parsed.type === "error") {
+        finish(parsed.message ?? "");
+      }
+    };
+
+    // Rede móvel oscila. Não reconecta sozinho (recomeçaria a busca e gastaria a API de novo), mas mantém os
+    // leads já encontrados e avisa sem alert() bloqueante.
+    sse.onerror = () => {
+      finish("Conexão interrompida. Os leads encontrados foram mantidos; toque em buscar para tentar de novo.");
     };
   };
 
-  const getSiteStatusColor = (status: string) => {
-    switch (status) {
-      case 'Sem Site': return 'bg-destructive/20 text-destructive border-destructive/30';
-      case 'HTTP Inseguro': return 'bg-orange-500/20 text-orange-500 border-orange-500/30';
-      case 'Erro 404/Inativo': return 'bg-muted/50 text-muted-foreground border-muted/50';
-      case 'SSL Válido': return 'bg-green-500/20 text-green-500 border-green-500/30';
-      default: return 'bg-secondary text-secondary-foreground';
+  const pitchFor = useCallback(
+    (lead: Lead) => buildPitch(lead, pitchLangFor(country), lead.expansionSource || city.split(" - ")[0].trim() || "sua região"),
+    [country, city]
+  );
+
+  const handleCopyMessage = useCallback(async (lead: Lead) => {
+    const ok = await copyToClipboard(pitchFor(lead));
+    if (!ok) {
+      showToast("Não foi possível copiar.");
+      return;
     }
-  };
+    setCopiedId(lead.id);
+    if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = window.setTimeout(() => setCopiedId(null), 1800);
+  }, [pitchFor, showToast]);
 
-  const generatePASCopy = (lead: Lead) => {
-    const nicho = lead.category || "seu negócio";
-    const lang = country === 'us' ? 'en' : (country === 'es' ? 'es' : 'pt');
-    
-    // Extraindo cidade a partir do endereço para usar no texto (preferindo a fonte de expansão se houver)
-    const cidade = lead.isExpansion && lead.expansionSource ? lead.expansionSource : (lead.address ? lead.address.split(',')[0].split('-')[0].trim() : (city || 'sua região'));
-    
-    if (lead.siteStatus === 'Sem Site' || lead.siteStatus === 'Erro 404/Inativo') {
-      if (lang === 'en') {
-        return `Hi ${lead.name} team! I found your business while searching in ${cidade} and noticed your great reputation, but I realized you don't have an official website yet. Local businesses lose daily quotes when clients search on their phones and only find competitors' pages. I've designed a practical digital capture structure for your profile. Can we schedule a quick, no-obligation meeting this week so I can present it to you?`;
-      } else if (lang === 'es') {
-        return `¡Hola equipo de ${lead.name}! Los encontré en las búsquedas en ${cidade} y vi la gran reputación de la empresa, pero noté que aún no tienen un sitio web oficial. Los negocios locales pierden cotizaciones diarias cuando los clientes buscan desde el móvil y solo encuentran la página de la competencia. He diseñado una estructura práctica de captación digital para su perfil. ¿Podemos agendar una reunión rápida sin compromiso esta semana para presentárselo?`;
-      } else {
-        return `Olá, responsável da ${lead.name}! Encontrei vocês nas buscas em ${cidade} e vi a ótima reputação da empresa, mas percebi que ainda não possuem um site oficial. Negócios locais perdem orçamentos diários quando clientes pesquisam no celular e encontram apenas a página de concorrentes. Desenhei uma estrutura prática de captação digital para o perfil de vocês. Podemos marcar uma reunião rápida sem compromisso esta semana para eu te apresentar?`;
-      }
-    } else {
-      if (lang === 'en') {
-        return `Hi ${lead.name} team! I was searching for services in ${cidade} and tried to visit your website, but my browser blocked it with a 'Not Secure' warning due to a missing SSL certificate. This drives new clients away due to mistrust and drops your company's ranking in searches. I already mapped out exactly how to solve this. Can we schedule a quick, no-obligation meeting to talk about it?`;
-      } else if (lang === 'es') {
-        return `¡Hola equipo de ${lead.name}! Estaba buscando servicios en ${cidade} e intenté acceder a su sitio web, pero el navegador lo bloqueó con una alerta de 'No Seguro' por falta de certificado SSL. Esto aleja a nuevos clientes por desconfianza y hunde el posicionamiento de la empresa en las búsquedas. Ya tengo mapeado exactamente cómo resolverlo. ¿Podemos agendar una reunión rápida sin compromiso para conversar al respecto?`;
-      } else {
-        return `Olá, responsável da ${lead.name}! Estava pesquisando serviços em ${cidade} e tentei acessar o site de vocês, mas o navegador bloqueou alertando 'Não Seguro' por ausência de certificado SSL. Isso afasta novos clientes por desconfiança e derruba o posicionamento da empresa nas buscas. Já mapeei exatamente como resolver isso. Podemos marcar uma reunião rápida sem compromisso para conversarmos a respeito?`;
-      }
-    }
-  };
-
-  const handleCopyMessage = (lead: Lead) => {
-    const msg = generatePASCopy(lead);
-    navigator.clipboard.writeText(msg);
-  };
-
-  const handleCopyAllMessages = () => {
+  const handleCopyAllMessages = async () => {
     if (leads.length === 0) return;
-    const allMsgs = leads.map(l => `=== ${l.name} (${l.phone}) ===\n${generatePASCopy(l)}\n`).join('\n\n');
-    navigator.clipboard.writeText(allMsgs);
-    alert(t.copyAll + " OK!");
+    const all = leads.map((l) => `=== ${l.name} (${l.phone}) ===\n${pitchFor(l)}\n`).join("\n\n");
+    showToast((await copyToClipboard(all)) ? `${t.copyAll} OK!` : "Não foi possível copiar.");
   };
 
-  const handleOpenWhatsApp = (lead: Lead) => {
-    const msg = generatePASCopy(lead);
-    const num = lead.phone.replace(/\D/g, '');
-    window.open(`https://wa.me/${country==='br'?'55':''}${num}?text=${encodeURIComponent(msg)}`, '_blank');
-  };
+  const handleOpenWhatsApp = useCallback((lead: Lead) => {
+    const number = whatsappOf(lead);
+    if (!number) return;
+    window.open(`https://wa.me/${internationalNumber(number, country)}?text=${encodeURIComponent(pitchFor(lead))}`, "_blank", "noopener,noreferrer");
+  }, [country, pitchFor]);
 
-  const handleCall = (lead: Lead) => {
-    const num = lead.phone.replace(/\D/g, '');
-    window.open(`tel:+${country==='br'?'55':''}${num}`, '_self');
-  };
+  const handleCall = useCallback((lead: Lead) => {
+    const number = callOf(lead);
+    if (!number) return;
+    window.open(`tel:+${internationalNumber(number, country)}`, "_self");
+  }, [country]);
 
   const handleExportCSV = () => {
     if (leads.length === 0) return;
     const headers = [
-      "Nome", 
-      "Segmento", 
-      "Origem (Expansão)", 
-      "DDD", 
-      "Telefone (Fixo/WPP)", 
-      "Tipo Tel", 
-      "E-mail Confirmado", 
-      "Endereço Completo", 
-      "Status do Site", 
-      "URL", 
-      "Avaliação Google",
-      "Score"
+      "Nome", "Segmento", "Origem (Expansão)", "DDD", "Telefone (Fixo/WPP)", "Tipo Tel", "WhatsApp",
+      "E-mail Confirmado", "Endereço Completo", "Status do Site", "URL", "Avaliação Google", "Score",
     ];
 
-    const csvContent = [
-      headers.join(";"),
-      ...leads.map(l => {
-        let ddd = "";
-        let phoneStr = l.phone;
-        const digits = l.phone.replace(/\D/g, '');
-        if (digits.length >= 10 && (digits.startsWith("55") ? digits.length >= 12 : true)) {
-          const brDigits = digits.startsWith("55") ? digits.slice(2) : digits;
-          ddd = brDigits.slice(0, 2);
-          phoneStr = brDigits.slice(2);
-        }
-        
-        return [
-          `"${l.name}"`, 
-          `"${l.category}"`, 
-          `"${l.isExpansion ? (l.expansionSource || 'Expansão') : 'Busca Primária'}"`, 
-          `"${ddd}"`, 
-          `"${phoneStr}"`, 
-          `"${l.phoneType || 'UNKNOWN'}"`, 
-          `"${l.email}"`, 
-          `"${l.address}"`, 
-          `"${l.siteStatus}"`,
-          `"${l.website || ''}"`,
-          l.rating,
-          l.score
-        ].join(";")
-      })
-    ].join("\n");
+    const rows = leads.map((l) => {
+      let ddd = "";
+      let phoneStr = l.phone;
+      const digits = l.phone.replace(/\D/g, "");
+      if (digits.length >= 10 && (digits.startsWith("55") ? digits.length >= 12 : true)) {
+        const brDigits = digits.startsWith("55") ? digits.slice(2) : digits;
+        ddd = brDigits.slice(0, 2);
+        phoneStr = brDigits.slice(2);
+      }
+      return [
+        l.name, l.category, l.isExpansion ? (l.expansionSource || "Expansão") : "Busca Primária", ddd, phoneStr,
+        l.phoneType || "UNKNOWN", whatsappOf(l) ?? "", l.email, l.address, l.siteStatus, l.website || "", l.rating > 0 ? l.rating : "", l.score,
+      ].map(csvCell).join(";");
+    });
 
-    const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob(["﻿" + [headers.map(csvCell).join(";"), ...rows].join("\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
     link.download = "leads_pro_export.csv";
     link.click();
+    URL.revokeObjectURL(url);
   };
+
+  const target = parseInt(volume, 10) || 50;
 
   return (
     <div className="relative flex min-h-screen bg-[#090d16] overflow-hidden">
       {/* Padrão geométrico (Grid Pattern) */}
       <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none"></div>
-      
-      {/* Gradientes radiais (Glow tech) */}
-      <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-blue-900/15 blur-[120px] rounded-full pointer-events-none"></div>
-      <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-violet-900/10 blur-[120px] rounded-full pointer-events-none"></div>
+
+      {/* Brilhos de fundo. Gradiente radial no lugar de blur-[120px], que pesava muito na GPU do celular */}
+      <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-[radial-gradient(closest-side,rgba(30,58,138,0.28),transparent)] pointer-events-none"></div>
+      <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-[radial-gradient(closest-side,rgba(76,29,149,0.2),transparent)] pointer-events-none"></div>
 
       <aside className="relative z-10 w-20 hidden md:flex flex-col items-center py-8 gap-8 backdrop-blur-md bg-black/20 border-r border-white/10 sticky top-0 h-screen transition-all hover:w-64 group shadow-[4px_0_24px_rgba(0,0,0,0.2)]">
         <div className="w-10 h-10 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center flex-shrink-0 overflow-hidden shadow-lg">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.png" alt="Vanguard Logo" className="w-full h-full object-cover" />
         </div>
         <nav className="flex flex-col gap-4 w-full px-4 mt-8">
           {[
             { icon: LayoutDashboard, label: "Dashboard" },
             { icon: Search, label: "Prospecção" },
-            { icon: Settings, label: "Configurações" }
+            { icon: Settings, label: "Configurações" },
           ].map((item, i) => (
-            <button key={i} onClick={() => { if(item.label !== 'Prospecção') alert(`O módulo ${item.label} está em desenvolvimento.`) }} className="flex items-center gap-4 p-3 rounded-xl hover:bg-white/5 transition-all w-full text-muted-foreground hover:text-white group/btn">
+            <button key={i} onClick={() => { if (item.label !== "Prospecção") showToast(`O módulo ${item.label} está em desenvolvimento.`); }} className="flex items-center gap-4 p-3 rounded-xl hover:bg-white/5 transition-all w-full text-muted-foreground hover:text-white group/btn">
               <item.icon className="w-5 h-5 flex-shrink-0 group-hover/btn:scale-110 transition-transform" />
               <span className="opacity-0 group-hover:opacity-100 whitespace-nowrap transition-opacity duration-300 font-mono text-sm">{item.label}</span>
             </button>
@@ -262,17 +524,18 @@ export default function Home() {
         </nav>
       </aside>
 
-      <main className="relative z-10 flex-1 p-6 md:p-12 overflow-y-auto">
-        <div className="max-w-7xl mx-auto space-y-8">
-          
-          <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-black/20 p-6 rounded-3xl border border-white/5 backdrop-blur-sm shadow-xl">
+      <main className="relative z-10 flex-1 p-4 md:p-12 overflow-y-auto min-w-0">
+        <div className="max-w-7xl mx-auto space-y-6 md:space-y-8">
+
+          <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-black/40 md:bg-black/20 p-4 md:p-6 rounded-3xl border border-white/5 md:backdrop-blur-sm shadow-xl">
             <div className="flex items-center gap-4">
-              <img 
-                src="/logo.png" 
-                alt="Vanguard Web Studio" 
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/logo.png"
+                alt="Vanguard Web Studio"
                 className="h-10 w-auto md:h-16 object-contain rounded-xl shadow-lg border border-white/10"
                 onError={(e) => {
-                  e.currentTarget.style.display = 'none';
+                  e.currentTarget.style.display = "none";
                   console.error("Arquivo /logo.png não encontrado na pasta public/");
                 }}
               />
@@ -285,27 +548,33 @@ export default function Home() {
             </div>
           </header>
 
-          <Card className="backdrop-blur-xl bg-black/40 border border-white/20 rounded-3xl shadow-2xl overflow-hidden">
+          <Card className="bg-black/60 md:bg-black/40 md:backdrop-blur-xl border border-white/20 rounded-3xl shadow-2xl overflow-hidden">
             <CardHeader className="border-b border-white/10 bg-white/5">
               <CardTitle className="font-serif italic font-light text-2xl">Grid Search (Ultra Qualificado)</CardTitle>
               <CardDescription className="font-mono text-xs">Excluindo empresas sem meios de contato. Foco absoluto em leads conversíveis.</CardDescription>
             </CardHeader>
-            <CardContent className="p-6">
+            <CardContent className="p-4 md:p-6">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                
+
                 <div className="space-y-4 col-span-1 md:col-span-2">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">{t.niche}</label>
                       <div className="relative">
                         <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                        <Input 
+                        <Input
                           placeholder={t.nichePlaceholder}
                           className="pl-9 bg-black/20 border-white/10 text-white placeholder:text-muted-foreground focus-visible:ring-primary/50"
                           value={category}
                           onChange={(e) => setCategory(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && startSearch()}
+                          onKeyDown={(e) => e.key === "Enter" && startSearch()}
+                          list="niche-suggestions"
+                          enterKeyHint="search"
+                          autoComplete="off"
                         />
+                        <datalist id="niche-suggestions">
+                          {Object.keys(semanticDictionary).map((niche) => <option key={niche} value={niche} />)}
+                        </datalist>
                       </div>
                     </div>
                     <div className="space-y-2">
@@ -322,31 +591,33 @@ export default function Home() {
                             <SelectItem value="es">ES 🇪🇸</SelectItem>
                           </SelectContent>
                         </Select>
-                        <Input 
+                        <Input
                           placeholder={t.cityPlaceholder}
                           value={city}
                           onChange={(e) => setCity(e.target.value)}
-                          className="bg-black/20 border-white/10 flex-1" 
-                          onKeyDown={(e) => e.key === 'Enter' && startSearch()}
-                          list="ibge-cities"
+                          className="bg-black/20 border-white/10 flex-1"
+                          onKeyDown={(e) => e.key === "Enter" && startSearch()}
+                          list="city-suggestions"
+                          enterKeyHint="search"
                           autoComplete="off"
+                          autoCorrect="off"
                         />
-                        <datalist id="ibge-cities">
-                          {ibgeCities.map((c, i) => <option key={i} value={c} />)}
+                        <datalist id="city-suggestions">
+                          {shownSuggestions.map((c) => <option key={c} value={c} />)}
                         </datalist>
                       </div>
                     </div>
                   </div>
 
                   <div className="space-y-3 pt-2">
-                    <div className="flex gap-4">
+                    <div className="flex flex-col sm:flex-row gap-3 sm:gap-6">
                       <div className="flex items-center space-x-2">
                         <Checkbox id="no-site" checked={noSite} onCheckedChange={(c) => setNoSite(c as boolean)} className="border-white/20 data-[state=checked]:bg-primary" />
-                        <label htmlFor="no-site" className="text-sm font-medium leading-none text-gray-300">{t.onlyNoSite}</label>
+                        <label htmlFor="no-site" className="text-sm font-medium leading-tight text-gray-300">{t.onlyNoSite}</label>
                       </div>
                       <div className="flex items-center space-x-2">
                         <Checkbox id="insecure" checked={insecure} onCheckedChange={(c) => setInsecure(c as boolean)} className="border-white/20 data-[state=checked]:bg-primary" />
-                        <label htmlFor="insecure" className="text-sm font-medium leading-none text-gray-300">{t.onlyInsecure}</label>
+                        <label htmlFor="insecure" className="text-sm font-medium leading-tight text-gray-300">{t.onlyInsecure}</label>
                       </div>
                     </div>
                   </div>
@@ -368,14 +639,14 @@ export default function Home() {
                     </Select>
                   </div>
                 </div>
-                
+
                 <div className="flex flex-col justify-end space-y-3">
                   {loading ? (
                     <Button variant="destructive" className="w-full h-12 shadow-[0_0_20px_rgba(220,38,38,0.3)] transition-all" onClick={stopSearch}>
                       {t.buttonStop}
                     </Button>
                   ) : (
-                    <Button 
+                    <Button
                       className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-12 shadow-[0_0_20px_rgba(var(--primary),0.3)] hover:shadow-[0_0_30px_rgba(var(--primary),0.5)] transition-all"
                       onClick={startSearch}
                     >
@@ -387,228 +658,91 @@ export default function Home() {
             </CardContent>
           </Card>
 
-          <Card className="backdrop-blur-xl bg-black/40 border border-white/20 rounded-3xl overflow-hidden shadow-2xl">
-            <CardHeader className="flex flex-row items-center justify-between border-b border-white/10 bg-white/5 flex-wrap gap-4">
-              <div>
-                <CardTitle className="font-serif italic font-light text-2xl flex items-center gap-3">
-                  {t.results}
-                  {loading && <span className="flex h-3 w-3 relative"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span></span>}
-                </CardTitle>
-                <CardDescription className="font-mono text-xs">{leads.length} leads qualificados. {statusMessage}</CardDescription>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white" onClick={handleCopyAllMessages}>
-                  <FileText className="w-4 h-4 mr-2" />
-                  {t.copyAll}
-                </Button>
-                <Button variant="outline" size="sm" className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white" onClick={handleExportCSV}>
-                  <Download className="w-4 h-4 mr-2" />
-                  {t.exportCsv}
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              
-              {/* MOBILE LAYOUT (CARDS) */}
-              <div className="md:hidden flex flex-col gap-4 p-4">
-                {!hasSearched ? (
-                  <div className="text-center py-12 text-muted-foreground font-mono text-sm">Pronto para buscar no país selecionado.</div>
-                ) : leads.length === 0 && !loading ? (
-                  <div className="text-center py-12 text-muted-foreground font-mono text-sm">Nenhuma oportunidade encontrada.</div>
+          <div ref={resultsRef} className="scroll-mt-4">
+            <Card className="bg-black/60 md:bg-black/40 md:backdrop-blur-xl border border-white/20 rounded-3xl overflow-hidden shadow-2xl">
+              <CardHeader className="flex flex-row items-center justify-between border-b border-white/10 bg-white/5 flex-wrap gap-4">
+                <div>
+                  <CardTitle className="font-serif italic font-light text-2xl flex items-center gap-3">
+                    {t.results}
+                    {loading && <span className="flex h-3 w-3 relative"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span></span>}
+                  </CardTitle>
+                  <CardDescription className="font-mono text-xs">{leads.length}{loading ? `/${target}` : ""} leads qualificados. {statusMessage}</CardDescription>
+                </div>
+                <div className="flex flex-wrap gap-2 w-full md:w-auto">
+                  <Button variant="outline" size="sm" className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white" onClick={handleCopyAllMessages}>
+                    <FileText className="w-4 h-4 mr-2" />
+                    {t.copyAll}
+                  </Button>
+                  <Button variant="outline" size="sm" className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white" onClick={handleExportCSV}>
+                    <Download className="w-4 h-4 mr-2" />
+                    {t.exportCsv}
+                  </Button>
+                </div>
+              </CardHeader>
+              {loading && (
+                <div className="h-0.5 bg-white/10">
+                  <div className="h-full bg-primary transition-all duration-500" style={{ width: `${Math.min(100, (leads.length / target) * 100)}%` }} />
+                </div>
+              )}
+              <CardContent className="p-0">
+                {!isDesktop ? (
+                  // MOBILE (cards)
+                  <div className="flex flex-col gap-4 p-4">
+                    {!hasSearched ? (
+                      <div className="text-center py-12 text-muted-foreground font-mono text-sm">Pronto para buscar no país selecionado.</div>
+                    ) : leads.length === 0 && !loading ? (
+                      <div className="text-center py-12 text-muted-foreground font-mono text-sm">Nenhuma oportunidade encontrada.</div>
+                    ) : (
+                      leads.map((lead) => (
+                        <LeadCard key={lead.id} lead={lead} copied={copiedId === lead.id} onCopy={handleCopyMessage} onWhatsApp={handleOpenWhatsApp} onCall={handleCall} />
+                      ))
+                    )}
+                  </div>
                 ) : (
-                  leads.map(lead => (
-                    <div key={lead.id} className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-3 relative overflow-hidden">
-                      {lead.isExpansion && (
-                        <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>
-                      )}
-                      <div>
-                        <div className="font-medium text-white text-lg flex items-center gap-2">
-                          {lead.name}
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-1">{lead.category}</div>
-                        {lead.isExpansion && <div className="text-[10px] text-indigo-400 mt-1">🚀 EXPANSÃO: {lead.expansionSource}</div>}
-                      </div>
-                      
-                      <div className="flex flex-col gap-1 text-sm text-gray-300">
-                        {lead.phone !== 'Não informado' && <div className="flex items-center gap-2"><Phone className="w-3 h-3 text-muted-foreground"/> {lead.phone}</div>}
-                        {lead.email !== 'N/D' && <div className="flex items-center gap-2"><Mail className="w-3 h-3 text-muted-foreground"/> {lead.email}</div>}
-                        <div className="flex items-center gap-2"><MapPin className="w-3 h-3 text-muted-foreground"/> <span className="truncate">{lead.address}</span></div>
-                      </div>
-
-                      <div className="flex items-center justify-between pt-2 border-t border-white/10">
-                        <Badge variant="outline" className={`${getSiteStatusColor(lead.siteStatus)} font-mono text-[10px] uppercase`}>{lead.siteStatus}</Badge>
-                        <div className="flex items-center gap-1">
-                          <Star className="w-3 h-3 text-yellow-500 fill-current" />
-                          <span className="text-xs text-yellow-500">{Number(lead.rating).toFixed(1)}</span>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 mt-2">
-                        <Button variant="outline" size="sm" className="bg-white/5 border-white/10 text-xs" onClick={() => { handleCopyMessage(lead); alert("Copiado!"); }}>
-                          <Copy className="w-3 h-3 mr-1" /> Copiar
-                        </Button>
-                        {lead.phone !== 'Não informado' && lead.phoneType === 'LANDLINE' && (
-                          <Button variant="default" size="sm" className="bg-blue-600/20 text-blue-400 border-blue-500/50 text-xs" onClick={() => handleCall(lead)}>
-                            <Phone className="w-3 h-3 mr-1" /> Ligar
-                          </Button>
-                        )}
-                        {lead.phone !== 'Não informado' && lead.phoneType === 'MOBILE' && (
-                          <Button variant="default" size="sm" className="bg-[#25D366]/20 text-[#25D366] border-[#25D366]/50 shadow-[0_0_10px_rgba(37,211,102,0.1)] text-xs" onClick={() => handleOpenWhatsApp(lead)}>
-                            <MessageCircle className="w-3 h-3 mr-1" /> WPP
-                          </Button>
-                        )}
-                      </div>
+                  // DESKTOP (tabela)
+                  <div className="overflow-x-auto">
+                    <div className="min-w-[900px]">
+                      <Table>
+                        <TableHeader className="bg-white/5">
+                          <TableRow className="border-white/10 hover:bg-transparent">
+                            <TableHead className="font-mono text-xs uppercase text-muted-foreground w-[30%]">Empresa & Contato</TableHead>
+                            <TableHead className="font-mono text-xs uppercase text-muted-foreground w-[25%]">Presença Digital</TableHead>
+                            <TableHead className="font-mono text-xs uppercase text-muted-foreground">Diagnóstico</TableHead>
+                            <TableHead className="font-mono text-xs uppercase text-muted-foreground">Score</TableHead>
+                            <TableHead className="text-right font-mono text-xs uppercase text-muted-foreground">Abordagem</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {!hasSearched ? (
+                            <TableRow>
+                              <TableCell colSpan={5} className="text-center py-12 text-muted-foreground font-mono">Pronto para buscar no país selecionado.</TableCell>
+                            </TableRow>
+                          ) : leads.length === 0 && !loading ? (
+                            <TableRow>
+                              <TableCell colSpan={5} className="text-center py-12 text-muted-foreground font-mono">Nenhuma oportunidade encontrada. Tente expandir a região.</TableCell>
+                            </TableRow>
+                          ) : (
+                            leads.map((lead) => (
+                              <LeadRow key={lead.id} lead={lead} copied={copiedId === lead.id} onCopy={handleCopyMessage} onWhatsApp={handleOpenWhatsApp} onCall={handleCall} />
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
                     </div>
-                  ))
+                  </div>
                 )}
-              </div>
-
-              {/* DESKTOP LAYOUT (TABLE) */}
-              <div className="hidden md:block overflow-x-auto">
-                <div className="min-w-[900px]">
-                  <Table>
-                    <TableHeader className="bg-white/5">
-                      <TableRow className="border-white/10 hover:bg-transparent">
-                      <TableHead className="font-mono text-xs uppercase text-muted-foreground w-[30%]">Empresa & Contato</TableHead>
-                      <TableHead className="font-mono text-xs uppercase text-muted-foreground w-[25%]">Presença Digital</TableHead>
-                      <TableHead className="font-mono text-xs uppercase text-muted-foreground">Diagnóstico</TableHead>
-                      <TableHead className="font-mono text-xs uppercase text-muted-foreground">Score</TableHead>
-                      <TableHead className="text-right font-mono text-xs uppercase text-muted-foreground">Abordagem</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                  {!hasSearched ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center py-12 text-muted-foreground font-mono">Pronto para buscar no país selecionado.</TableCell>
-                    </TableRow>
-                  ) : leads.length === 0 && !loading ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center py-12 text-muted-foreground font-mono">Nenhuma oportunidade encontrada. Tente expandir a região.</TableCell>
-                    </TableRow>
-                  ) : (
-                    leads.map((lead) => (
-                      <TableRow key={lead.id} className={`border-white/10 hover:bg-white/5 transition-colors group ${lead.isExpansion ? 'bg-indigo-900/10' : ''}`}>
-                        <TableCell>
-                          <div className="font-medium text-white group-hover:text-primary transition-colors flex flex-wrap items-center gap-2">
-                            {lead.name}
-                            <Badge variant="outline" className="bg-green-500/10 text-green-400 border-green-500/30 text-[9px] px-1 uppercase whitespace-nowrap flex items-center gap-1">
-                              <CheckCircle2 className="w-3 h-3" /> VERIFICADO
-                            </Badge>
-                            {lead.isExpansion && (
-                              <Badge variant="outline" className="bg-indigo-500/10 text-indigo-400 border-indigo-500/30 text-[9px] px-1 uppercase whitespace-nowrap">
-                                🚀 EXPANSÃO: {lead.expansionSource}
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="text-[10px] uppercase font-mono tracking-wider text-muted-foreground mt-1 mb-1">{lead.category}</div>
-                          
-                          <div className="flex items-center gap-2 mt-2">
-                            {lead.phone !== 'Não informado' && (
-                              <div className="text-sm font-mono text-white flex items-center">
-                                {lead.phoneType === 'MOBILE' ? (
-                                  <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/30 text-[9px] mr-2 px-1">WPP</Badge>
-                                ) : lead.phoneType === 'LANDLINE' ? (
-                                  <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/30 text-[9px] mr-2 px-1">FIXO</Badge>
-                                ) : null}
-                                {lead.phone}
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="text-xs text-muted-foreground flex items-center mt-2">
-                            <MapPin className="w-3 h-3 mr-1 opacity-70 flex-shrink-0" />
-                            <span className="truncate max-w-[200px] block" title={lead.address}>{lead.address}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-1">
-                            {lead.email !== 'N/D' ? (
-                              <div className="text-xs text-muted-foreground truncate max-w-[180px]" title={lead.email}>
-                                📧 {lead.email}
-                              </div>
-                            ) : (
-                              <div className="text-xs text-muted-foreground/50 italic">📧 Sem E-mail detectado</div>
-                            )}
-                            
-                            {lead.website ? (
-                              <div className="text-xs text-blue-400 truncate max-w-[180px] hover:underline cursor-pointer" onClick={() => window.open(lead.website?.startsWith('http') ? lead.website : `http://${lead.website}`, '_blank')}>
-                                🌐 {lead.website}
-                              </div>
-                            ) : (
-                              <div className="text-xs text-muted-foreground/50 italic">🌐 Nenhum domínio detectado</div>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col items-start gap-2">
-                            <Badge variant="outline" className={`${getSiteStatusColor(lead.siteStatus)} font-mono text-[10px] uppercase`}>
-                              {lead.siteStatus}
-                            </Badge>
-                            {lead.rating && lead.rating > 0 && (
-                              <div className="flex items-center text-xs text-yellow-500 bg-yellow-500/10 px-2 py-0.5 rounded-full border border-yellow-500/20">
-                                <Star className="w-3 h-3 mr-1 fill-current" />
-                                {Number(lead.rating).toFixed(1)} <span className="text-muted-foreground ml-1">({lead.reviewsCount})</span>
-                              </div>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden w-16">
-                              <div 
-                                className={`h-full ${lead.score > 80 ? 'bg-green-500' : lead.score > 50 ? 'bg-yellow-500' : 'bg-red-500'}`} 
-                                style={{ width: `${lead.score}%` }} 
-                              />
-                            </div>
-                            <span className="text-xs font-mono text-muted-foreground">{lead.score}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex flex-col gap-2 items-end">
-                            <Button 
-                              variant="outline" size="sm" 
-                              className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white transition-all text-[10px] h-7 w-24 flex justify-between"
-                              onClick={() => { handleCopyMessage(lead); alert("Copy PAS copiada!"); }}
-                            >
-                              Copiar Pitch
-                              <Copy className="w-3 h-3 ml-1" />
-                            </Button>
-                            
-                            {lead.phone !== 'Não informado' && (
-                              lead.phoneType === 'LANDLINE' ? (
-                                <Button 
-                                  variant="default" size="sm" 
-                                  className="bg-blue-600/20 text-blue-400 border border-blue-500/50 hover:bg-blue-600 hover:text-white transition-all text-[10px] h-7 w-24 flex justify-between"
-                                  onClick={() => handleCall(lead)}
-                                >
-                                  Ligar Fixo
-                                  <Phone className="w-3 h-3 ml-1" />
-                                </Button>
-                              ) : (
-                                <Button 
-                                  variant="default" size="sm" 
-                                  className="bg-[#25D366]/20 text-[#25D366] border border-[#25D366]/50 hover:bg-[#25D366] hover:text-white transition-all shadow-[0_0_10px_rgba(37,211,102,0.1)] hover:shadow-[0_0_20px_rgba(37,211,102,0.4)] text-[10px] h-7 w-24 flex justify-between"
-                                  onClick={() => handleOpenWhatsApp(lead)}
-                                >
-                                  WhatsApp
-                                  <MessageCircle className="w-3 h-3 ml-1" />
-                                </Button>
-                              )
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-              </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
 
         </div>
       </main>
+
+      {toast && (
+        <div role="status" className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 max-w-[90vw] rounded-full bg-black/90 border border-white/20 px-4 py-2 text-sm text-white shadow-xl pointer-events-none">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

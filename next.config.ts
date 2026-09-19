@@ -1,28 +1,14 @@
 import type { NextConfig } from "next";
 
-const cspHeader = `
-  default-src 'self';
-  script-src 'self' 'unsafe-inline' 'unsafe-eval';
-  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-  img-src 'self' data: https: blob:;
-  font-src 'self' data: https://fonts.gstatic.com;
-  connect-src 'self' https:;
-  object-src 'none';
-  base-uri 'self';
-  frame-ancestors 'none';
-  frame-src 'self' https://www.google.com https://maps.google.com;
-`;
-
+// A Content-Security-Policy (com nonce por requisição) é definida em src/proxy.ts.
 const nextConfig: NextConfig = {
+  // Não anuncia "X-Powered-By: Next.js" (informação inútil para o visitante e útil para quem procura versões vulneráveis).
+  poweredByHeader: false,
   async headers() {
     return [
       {
         source: '/(.*)',
         headers: [
-          {
-            key: 'Content-Security-Policy',
-            value: cspHeader.replace(/\n/g, ''),
-          },
           {
             key: 'Strict-Transport-Security',
             value: 'max-age=63072000; includeSubDomains; preload',
@@ -45,12 +31,13 @@ const nextConfig: NextConfig = {
           },
           {
             key: 'Cross-Origin-Resource-Policy',
-            value: 'same-site',
+            value: 'same-origin',
           },
           {
+            // O app não usa nenhum destes recursos: nega todos (antes a geolocalização estava liberada para o próprio site).
             key: 'Permissions-Policy',
-            value: 'camera=(), microphone=(), geolocation=(self)',
-          }
+            value: 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=(), browsing-topics=()',
+          },
         ],
       },
     ];

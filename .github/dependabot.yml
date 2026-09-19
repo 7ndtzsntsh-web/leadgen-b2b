@@ -1,0 +1,12 @@
+# Atualizações automáticas de segurança: o GitHub abre um Pull Request quando uma dependência tem
+# versão nova ou vulnerabilidade conhecida. A Vercel gera a prévia de cada PR para você conferir antes do merge.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
