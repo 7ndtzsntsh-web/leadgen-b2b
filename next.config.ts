@@ -12,6 +12,14 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        // As respostas da API (JSON e eventos SSE) nunca devem ser interpretadas como página: CSP que nega tudo.
+        // (As páginas recebem a CSP com nonce de src/proxy.ts; a API fica fora dele.)
+        source: '/api/:path*',
+        headers: [
+          { key: 'Content-Security-Policy', value: "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" },
+        ],
+      },
+      {
         source: '/(.*)',
         headers: [
           {
