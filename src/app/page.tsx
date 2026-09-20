@@ -98,6 +98,43 @@ function contactOf(lead: Lead) {
   return { wpp, call, plain };
 }
 
+/**
+ * Selo de verificação: reflete as checagens REAIS feitas no servidor (telefone, WhatsApp, e-mail, site, atividade
+ * da empresa e cidade do endereço). Só é "VERIFICADO" quando TODAS foram confirmadas; o resto é "PARCIAL" com o motivo.
+ * Usa <details>, então abre com um toque no celular (não depende de passar o mouse).
+ */
+function VerificationDetails({ lead }: { lead: Lead }) {
+  const checks = lead.checks ?? [];
+  if (checks.length === 0) return null;
+  const confirmed = checks.filter((c) => c.ok).length;
+  return (
+    <details className="text-[11px]">
+      <summary
+        className="list-none cursor-pointer inline-flex items-center gap-2 select-none py-3 md:py-1 [&::-webkit-details-marker]:hidden"
+        aria-label="Ver o que foi verificado neste lead"
+      >
+        {lead.verified ? (
+          <Badge variant="outline" className="bg-green-500/10 text-green-400 border-green-500/30 text-[9px] px-1 uppercase whitespace-nowrap flex items-center gap-1">
+            <CheckCircle2 className="w-3 h-3" /> VERIFICADO
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="bg-yellow-500/10 text-yellow-400 border-yellow-500/30 text-[9px] px-1 uppercase whitespace-nowrap">
+            ⚠ PARCIAL {confirmed}/{checks.length}
+          </Badge>
+        )}
+        <span className="text-muted-foreground underline decoration-dotted">o que foi checado</span>
+      </summary>
+      <ul className="mt-2 space-y-1 leading-snug">
+        {checks.map((c) => (
+          <li key={c.key} className={c.ok ? "text-green-400" : "text-yellow-400"}>
+            {c.ok ? "✔" : "⚠"} {c.detail}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 const LeadCard = memo(function LeadCard({ lead, copied, onCopy, onWhatsApp, onCall }: LeadItemProps) {
   const { wpp, call, plain } = contactOf(lead);
   return (
@@ -106,6 +143,7 @@ const LeadCard = memo(function LeadCard({ lead, copied, onCopy, onWhatsApp, onCa
       <div>
         <div className="font-medium text-white text-lg flex items-center gap-2">{lead.name}</div>
         <div className="text-xs text-muted-foreground mt-1">{lead.category}</div>
+        <div className="mt-2"><VerificationDetails lead={lead} /></div>
         {lead.isExpansion && <div className="text-[10px] text-indigo-400 mt-1">🚀 EXPANSÃO: {lead.expansionSource}</div>}
       </div>
 
@@ -130,16 +168,16 @@ const LeadCard = memo(function LeadCard({ lead, copied, onCopy, onWhatsApp, onCa
       </div>
 
       <div className="grid grid-cols-2 gap-2 mt-1">
-        <Button variant="outline" className="bg-white/5 border-white/10 text-xs h-10" onClick={() => onCopy(lead)}>
+        <Button variant="outline" className="bg-white/5 border-white/10 text-xs h-11" onClick={() => onCopy(lead)}>
           {copied ? <Check className="w-3 h-3 mr-1" /> : <Copy className="w-3 h-3 mr-1" />} {copied ? "Copiado" : "Copiar"}
         </Button>
         {wpp && (
-          <Button variant="default" className="bg-[#25D366]/20 text-[#25D366] border-[#25D366]/50 text-xs h-10" onClick={() => onWhatsApp(lead)}>
+          <Button variant="default" className="bg-[#25D366]/20 text-[#25D366] border-[#25D366]/50 text-xs h-11" onClick={() => onWhatsApp(lead)}>
             <MessageCircle className="w-3 h-3 mr-1" /> WPP
           </Button>
         )}
         {call && (
-          <Button variant="default" className={`bg-blue-600/20 text-blue-400 border-blue-500/50 text-xs h-10 ${wpp ? "col-span-2" : ""}`} onClick={() => onCall(lead)}>
+          <Button variant="default" className={`bg-blue-600/20 text-blue-400 border-blue-500/50 text-xs h-11 ${wpp ? "col-span-2" : ""}`} onClick={() => onCall(lead)}>
             <Phone className="w-3 h-3 mr-1" /> Ligar
           </Button>
         )}
@@ -155,9 +193,6 @@ const LeadRow = memo(function LeadRow({ lead, copied, onCopy, onWhatsApp, onCall
       <TableCell>
         <div className="font-medium text-white group-hover:text-primary transition-colors flex flex-wrap items-center gap-2">
           {lead.name}
-          <Badge variant="outline" className="bg-green-500/10 text-green-400 border-green-500/30 text-[9px] px-1 uppercase whitespace-nowrap flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3" /> VERIFICADO
-          </Badge>
           {lead.isExpansion && (
             <Badge variant="outline" className="bg-indigo-500/10 text-indigo-400 border-indigo-500/30 text-[9px] px-1 uppercase whitespace-nowrap">
               🚀 EXPANSÃO: {lead.expansionSource}
@@ -165,6 +200,7 @@ const LeadRow = memo(function LeadRow({ lead, copied, onCopy, onWhatsApp, onCall
           )}
         </div>
         <div className="text-[10px] uppercase font-mono tracking-wider text-muted-foreground mt-1 mb-1">{lead.category}</div>
+        <div className="mt-1"><VerificationDetails lead={lead} /></div>
 
         <div className="flex flex-col gap-1 mt-2">
           {lead.whatsapp && (
@@ -430,7 +466,8 @@ export default function Home() {
   };
 
   const pitchFor = useCallback(
-    (lead: Lead) => buildPitch(lead, pitchLangFor(country), lead.expansionSource || city.split(" - ")[0].trim() || "sua região"),
+    // A cidade do ENDEREÇO do lead vem primeiro (a busca pode devolver empresas de cidades vizinhas).
+    (lead: Lead) => buildPitch(lead, pitchLangFor(country), lead.city || lead.expansionSource || city.split(" - ")[0].trim() || "sua região"),
     [country, city]
   );
 
@@ -467,7 +504,8 @@ export default function Home() {
     if (leads.length === 0) return;
     const headers = [
       "Nome", "Segmento", "Origem (Expansão)", "DDD", "Telefone (Fixo/WPP)", "Tipo Tel", "WhatsApp",
-      "E-mail Confirmado", "Endereço Completo", "Status do Site", "URL", "Avaliação Google", "Score",
+      "E-mail do site (domínio recebe e-mails)", "Endereço Completo", "Cidade (do endereço)", "Status do Site", "URL",
+      "Avaliação Google", "Score", "Verificação", "Checagens",
     ];
 
     const rows = leads.map((l) => {
@@ -481,7 +519,9 @@ export default function Home() {
       }
       return [
         l.name, l.category, l.isExpansion ? (l.expansionSource || "Expansão") : "Busca Primária", ddd, phoneStr,
-        l.phoneType || "UNKNOWN", whatsappOf(l) ?? "", l.email, l.address, l.siteStatus, l.website || "", l.rating > 0 ? l.rating : "", l.score,
+        l.phoneType || "UNKNOWN", whatsappOf(l) ?? "", l.email, l.address, l.city ?? "", l.siteStatus, l.website || "",
+        l.rating > 0 ? l.rating : "", l.score, l.verified ? "VERIFICADO" : "PARCIAL",
+        (l.checks ?? []).map((c) => `${c.ok ? "OK" : "PENDENTE"}: ${c.detail}`).join(" | "),
       ].map(csvCell).join(";");
     });
 
@@ -581,7 +621,7 @@ export default function Home() {
                       <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">{t.city}</label>
                       <div className="flex gap-2">
                         <Select value={country} onValueChange={(val) => { if (val) setCountry(val); }}>
-                          <SelectTrigger className="bg-black/20 border-white/10 w-24">
+                          <SelectTrigger className="bg-black/20 border-white/10 w-24 h-11! md:h-8!">
                             <SelectValue placeholder="País" />
                           </SelectTrigger>
                           <SelectContent>
@@ -611,11 +651,11 @@ export default function Home() {
 
                   <div className="space-y-3 pt-2">
                     <div className="flex flex-col sm:flex-row gap-3 sm:gap-6">
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-2 min-h-11 md:min-h-0">
                         <Checkbox id="no-site" checked={noSite} onCheckedChange={(c) => setNoSite(c as boolean)} className="border-white/20 data-[state=checked]:bg-primary" />
                         <label htmlFor="no-site" className="text-sm font-medium leading-tight text-gray-300">{t.onlyNoSite}</label>
                       </div>
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-2 min-h-11 md:min-h-0">
                         <Checkbox id="insecure" checked={insecure} onCheckedChange={(c) => setInsecure(c as boolean)} className="border-white/20 data-[state=checked]:bg-primary" />
                         <label htmlFor="insecure" className="text-sm font-medium leading-tight text-gray-300">{t.onlyInsecure}</label>
                       </div>
@@ -627,7 +667,7 @@ export default function Home() {
                   <div className="space-y-2">
                     <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">{t.volume}</label>
                     <Select value={volume} onValueChange={(val) => { if (val) setVolume(val); }}>
-                      <SelectTrigger className="bg-black/20 border-white/10">
+                      <SelectTrigger className="bg-black/20 border-white/10 h-11! md:h-8!">
                         <SelectValue placeholder="Volume" />
                       </SelectTrigger>
                       <SelectContent>
@@ -669,11 +709,11 @@ export default function Home() {
                   <CardDescription className="font-mono text-xs">{leads.length}{loading ? `/${target}` : ""} leads qualificados. {statusMessage}</CardDescription>
                 </div>
                 <div className="flex flex-wrap gap-2 w-full md:w-auto">
-                  <Button variant="outline" size="sm" className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white" onClick={handleCopyAllMessages}>
+                  <Button variant="outline" size="sm" className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white h-11 md:h-7" onClick={handleCopyAllMessages}>
                     <FileText className="w-4 h-4 mr-2" />
                     {t.copyAll}
                   </Button>
-                  <Button variant="outline" size="sm" className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white" onClick={handleExportCSV}>
+                  <Button variant="outline" size="sm" className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white h-11 md:h-7" onClick={handleExportCSV}>
                     <Download className="w-4 h-4 mr-2" />
                     {t.exportCsv}
                   </Button>

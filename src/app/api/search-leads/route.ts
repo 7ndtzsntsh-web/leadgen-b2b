@@ -9,6 +9,9 @@ import { inspectWebsite } from '@/lib/domainValidator';
 import { AsyncQueue, runPool } from '@/lib/async';
 import { acquireSlot, guardApi } from '@/lib/apiGuard';
 import { normalizeText } from '@/lib/text';
+import { areaKey, checkAddress, type AddressCheck, type SearchedArea } from '@/lib/address';
+import { checkEmailDomain } from '@/lib/emailCheck';
+import { buildChecks, isVerified } from '@/lib/verification';
 import { NO_PHONE, cleanPhone, getPhoneType, matchesSiteFilters, pickWhatsApp, scoreLead, type SiteStatus } from '@/lib/leadRules';
 
 const GOOGLE_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
@@ -64,6 +67,10 @@ interface RawLead {
   whatsapp?: string;
   /** UF da localidade pesquisada, usada para validar o DDD do WhatsApp achado no site. */
   uf?: string;
+  /** A fonte informou que a empresa está em funcionamento (Google: businessStatus = OPERATIONAL). */
+  activeConfirmed: boolean;
+  /** Busca por região inteira: não há cidade específica para conferir com o endereço. */
+  scope?: 'city' | 'region';
   isExpansion: boolean;
   expansionSource: string;
 }
@@ -79,6 +86,8 @@ interface MiningContext {
   streamed: number;
   fatal: string | null;
   googleWorked: boolean;
+  /** Cidades e estados que esta busca cobre, para conferir o endereço de cada lead. */
+  area: SearchedArea;
   isDone: () => boolean;
   send: (data: unknown) => void;
 }
@@ -93,7 +102,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 function acceptPlace(ctx: MiningContext, queue: AsyncQueue<RawLead>, loc: SearchLocation, raw: RawLead, closed: boolean): boolean {
   if (ctx.seenIds.has(raw.id)) return false;
   ctx.seenIds.add(raw.id);
-  if (closed) return true;
+  if (closed || raw.name === 'Desconhecido') return true; // fechado, ou cadastro sem nome (não dá para abordar)
 
   const nameKey = normalizeText(raw.name).split(/\s[-–|]\s/)[0].replace(/[^a-z0-9]/g, '');
   const occurrences = (ctx.nameCounts.get(nameKey) ?? 0) + 1;
@@ -105,14 +114,36 @@ function acceptPlace(ctx: MiningContext, queue: AsyncQueue<RawLead>, loc: Search
     ctx.seenPhones.add(raw.phone);
   }
 
-  queue.push({ ...raw, isExpansion: loc.isExpansion, expansionSource: loc.city, uf: loc.uf });
+  queue.push({ ...raw, isExpansion: loc.isExpansion, expansionSource: loc.city, uf: loc.uf, scope: loc.scope ?? 'city' });
   return true;
+}
+
+/** Cidades/estados cobertos pela busca (pedida + expansões), para conferir o endereço de cada lead. */
+function buildSearchedArea(locations: SearchLocation[]): SearchedArea {
+  const area: SearchedArea = { cities: new Set(), ufs: new Set(), names: [] };
+  for (const loc of locations) {
+    if (loc.scope === 'region') continue;
+    if (loc.uf) {
+      area.cities.add(areaKey(loc.city, loc.uf));
+      area.ufs.add(loc.uf);
+    }
+    area.names.push(normalizeText(loc.city));
+  }
+  return area;
 }
 
 /** Verifica o site, aplica os filtros, pontua e envia o lead. */
 async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
   if (ctx.isDone()) return;
   if (!raw.website && raw.phone === NO_PHONE && !raw.whatsapp) return; // sem nenhum canal de contato
+
+  // Confere o endereço ANTES de gastar tempo no site: resultado de outro estado é descartado, e a cidade real
+  // do endereço é a que vai no texto de abordagem (não a cidade pesquisada).
+  let addressCheck: AddressCheck | null = null;
+  if (raw.scope !== 'region' && ctx.area.names.length > 0) {
+    addressCheck = checkAddress(raw.address, ctx.area);
+    if (addressCheck.status === 'wrong-state') return;
+  }
 
   let siteStatus: SiteStatus = 'Sem Site';
   let email = 'N/D';
@@ -125,10 +156,28 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
     whatsapp = pickWhatsApp(inspection.whatsapp, ctx.country, raw.uf) ?? whatsapp;
   }
 
+  // O domínio do e-mail precisa existir e receber mensagens; senão o e-mail é descartado (não vai para o lead).
+  let emailDomain: 'ok' | 'unknown' | undefined;
+  if (email !== 'N/D') {
+    const status = await checkEmailDomain(email);
+    if (status === 'invalid') email = 'N/D';
+    else emailDomain = status;
+  }
+
   // Depois de cada await a meta pode já ter sido atingida por outro lead.
   if (ctx.isDone()) return;
   if (raw.phone === NO_PHONE && email === 'N/D' && !whatsapp) return;
   if (!matchesSiteFilters(siteStatus, ctx.onlyNoSite, ctx.onlyInsecure)) return;
+
+  const checks = buildChecks({
+    phone: raw.phone !== NO_PHONE ? raw.phone : undefined,
+    uf: ctx.country === 'br' ? raw.uf : undefined,
+    whatsapp,
+    email: emailDomain,
+    siteStatus,
+    activeConfirmed: raw.activeConfirmed,
+    address: addressCheck,
+  });
 
   const phoneType = getPhoneType(raw.phone, ctx.country);
   const score = scoreLead({
@@ -160,6 +209,9 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
       email,
       phoneType,
       whatsapp,
+      city: addressCheck && 'city' in addressCheck ? addressCheck.city : undefined,
+      checks,
+      verified: isVerified(checks),
       score,
     },
   });
@@ -218,6 +270,7 @@ async function collectFromGoogle(ctx: MiningContext, queue: AsyncQueue<RawLead>,
           rating: p.rating || 0,
           reviewsCount: p.userRatingCount || 0,
           reviewsKnown: true,
+          activeConfirmed: p.businessStatus === 'OPERATIONAL',
           website: p.websiteUri,
           isExpansion: loc.isExpansion,
           expansionSource: loc.city,
@@ -275,6 +328,7 @@ async function collectFromNominatim(ctx: MiningContext, queue: AsyncQueue<RawLea
               rating: 0,
               reviewsCount: 0,
               reviewsKnown: false,
+              activeConfirmed: false, // o OpenStreetMap não informa se a empresa ainda funciona
               website: tags.website || tags['contact:website'] || tags.url,
               whatsapp,
               isExpansion: loc.isExpansion,
@@ -346,7 +400,7 @@ export async function GET(req: NextRequest) {
       const ctx: MiningContext = {
         volume, country, onlyNoSite, onlyInsecure,
         seenIds: new Set(), seenPhones: new Set(), nameCounts: new Map(),
-        streamed: 0, fatal: null, googleWorked: false,
+        streamed: 0, fatal: null, googleWorked: false, area: buildSearchedArea(locations),
         // Quando o usuário fecha a página/toca em "parar", a mineração para e não gasta mais chamadas à API.
         isDone: () => cancelled || ctx.streamed >= volume || Date.now() > deadline,
         send: (data) => write(`data: ${JSON.stringify(data)}\n\n`),

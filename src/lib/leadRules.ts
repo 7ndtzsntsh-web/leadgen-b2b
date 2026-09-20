@@ -6,6 +6,13 @@ export type PhoneType = "MOBILE" | "LANDLINE" | "UNKNOWN";
 
 export const NO_PHONE = "Não informado";
 
+/** Uma checagem real feita sobre o lead. `ok: false` = não confirmada (o motivo vai em `detail`). */
+export interface LeadCheck {
+  key: "telefone" | "whatsapp" | "email" | "site" | "atividade" | "cidade";
+  ok: boolean;
+  detail: string;
+}
+
 export interface Lead {
   id: string;
   name: string;
@@ -21,6 +28,11 @@ export interface Lead {
   phoneType?: PhoneType;
   /** WhatsApp achado no site/perfil da empresa (tem prioridade sobre o telefone do Google). */
   whatsapp?: string;
+  /** Cidade real do endereço (usada no texto de abordagem; pode diferir da cidade pesquisada). */
+  city?: string;
+  /** Checagens reais feitas neste lead e se todas foram confirmadas. */
+  checks?: LeadCheck[];
+  verified?: boolean;
   isExpansion?: boolean;
   expansionSource?: string;
 }

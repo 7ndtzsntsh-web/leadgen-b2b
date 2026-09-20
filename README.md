@@ -43,9 +43,19 @@ _(Consulte o arquivo `.env.example` para ver quais variáveis são necessárias 
 - **Filtro "Sem site":** inclui empresas sem site, só com Instagram/Facebook/link na bio e com site fora do ar.
 - **Pontuação (`src/lib/leadRules.ts`):** prioriza quem não tem site funcionando, é bem avaliado (tem clientes e verba), tem celular (WhatsApp) e e-mail. Empresas fechadas e redes/franquias (mesmo nome 3+ vezes) são descartadas.
 
+## ✅ Verificação dos dados (selo VERIFICADO / PARCIAL)
+O selo de cada lead é calculado no servidor (`src/lib/verification.ts`) a partir de checagens reais, e só é **VERIFICADO** se todas se confirmam; qualquer item não confirmado vira **PARCIAL** e o motivo aparece ao tocar em "o que foi checado".
+- **Telefone:** formato, DDD do estado pesquisado, números falsos e 0800.
+- **WhatsApp:** só conta como confirmado quando o número foi achado no site/perfil da própria empresa. Não é possível saber se um celular tem WhatsApp sem a API dele.
+- **E-mail:** extraído do site e o domínio precisa ter servidor de e-mail (registro MX, via DNS-sobre-HTTPS). Domínio inexistente ou que não recebe e-mail é descartado. Não prova que a caixa postal existe.
+- **Site:** requisição real (HTTPS e HTTP), incluindo redirecionamentos; perfis de rede social e diretórios (TripAdvisor, GuiaMais...) não contam como site da empresa.
+- **Empresa ativa:** status `OPERATIONAL` do Google. Sem a chave do Google (modo OpenStreetMap) fica não confirmado, então todos os leads saem PARCIAL.
+- **Cidade:** o endereço precisa estar numa das cidades pesquisadas; endereço de outro estado é descartado e a cidade real do endereço é a usada no texto de abordagem.
+
 ## 🔒 Segurança (padrão MDN HTTP Observatory, meta A+)
 Todo deploy deve passar nos 12 testes do [MDN HTTP Observatory](https://developer.mozilla.org/en-US/observatory).
 - **CSP estrita com nonce** em `src/proxy.ts` (sem `unsafe-inline`/`unsafe-eval` em produção, `object-src 'none'`). Outros headers em `next.config.ts` (HSTS com preload, `X-Frame-Options`, `nosniff`, COOP/CORP, `Referrer-Policy`).
+- **SRI:** `experimental.sri` (sha384) coloca `integrity` nos scripts do site; o navegador recusa qualquer arquivo alterado no caminho.
 - **Antes de publicar:** `npm run build && npm start` e, em outro terminal, `npm run security:scan`. Ele roda o scanner oficial do MDN no servidor local e falha (código 1) se algum teste reprovar.
 - **Depois de publicar:** confirme o domínio real na página do Observatório.
 - O servidor só consulta sites públicos (bloqueio de SSRF em `src/lib/domainValidator.ts`, inclusive em redirecionamentos).
