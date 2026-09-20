@@ -54,7 +54,7 @@ O selo de cada lead é calculado no servidor (`src/lib/verification.ts`) a parti
 
 ## 🔒 Segurança (padrão MDN HTTP Observatory, meta A+)
 Todo deploy deve passar nos 12 testes do [MDN HTTP Observatory](https://developer.mozilla.org/en-US/observatory).
-- **CSP estrita com nonce** em `src/proxy.ts` (sem `unsafe-inline`/`unsafe-eval` em produção, `object-src 'none'`). Outros headers em `next.config.ts` (HSTS com preload, `X-Frame-Options`, `nosniff`, COOP/CORP, `Referrer-Policy`).
+- **CSP "negar por padrão"** com nonce em `src/proxy.ts`: `default-src 'none'` e só o que o app usa é liberado (`script-src` com nonce + `strict-dynamic`, `style-src` com nonce, imagens/fontes/conexões só do próprio site). `frame-src`, `worker-src`, `manifest-src`, `media-src`, `object-src`, `base-uri` e `form-action` ficam `'none'`; sem `unsafe-inline`/`unsafe-eval` em produção. As respostas da API têm CSP `default-src 'none'` (em `next.config.ts`). Outros headers em `next.config.ts` (HSTS com preload, `X-Frame-Options`, `nosniff`, COOP/CORP, `Referrer-Policy`).
 - **SRI:** `experimental.sri` (sha384) coloca `integrity` nos scripts do site; o navegador recusa qualquer arquivo alterado no caminho.
 - **Antes de publicar:** `npm run build && npm start` e, em outro terminal, `npm run security:scan`. Ele roda o scanner oficial do MDN no servidor local e falha (código 1) se algum teste reprovar.
 - **Depois de publicar:** confirme o domínio real na página do Observatório.

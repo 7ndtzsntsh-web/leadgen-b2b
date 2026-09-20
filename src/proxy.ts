@@ -16,19 +16,27 @@ export function proxy(request: NextRequest) {
   const isDev = process.env.NODE_ENV === 'development';
 
   const csp = [
-    "default-src 'self'",
+    // Nega tudo por padrão e libera só o que o app usa (cada tipo de recurso abaixo é declarado de forma explícita).
+    "default-src 'none'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ''}`,
     `style-src 'self' ${isDev ? "'unsafe-inline'" : `'nonce-${nonce}'`}`,
     // Os campos escondidos dos componentes (base-ui: Select/Checkbox) vêm do servidor com este style="..." fixo.
     // Liberamos só esse estilo exato, por hash, em vez de abrir 'unsafe-inline' para todos os atributos style.
     // (Se uma atualização da biblioteca mudar o estilo, o CSS de segurança em globals.css mantém a tela correta.)
     `style-src-attr 'unsafe-hashes' '${VISUALLY_HIDDEN_STYLE_HASH}'`,
-    "img-src 'self' data: blob:",
+    // Só imagens do próprio site (o app não usa data:/blob: em imagens; o CSV usa blob: em download, que não passa por aqui).
+    // Em desenvolvimento o overlay de erros do Next usa data:.
+    `img-src 'self'${isDev ? ' data: blob:' : ''}`,
     "font-src 'self'",
     "connect-src 'self'",
     "object-src 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
+    // O app não usa iframes, workers, mídia, manifest, <base> nem formulários: tudo negado explicitamente.
+    "frame-src 'none'",
+    "worker-src 'none'",
+    "manifest-src 'none'",
+    "media-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
     "frame-ancestors 'none'",
     // Violações reais (em navegadores de verdade) chegam em /api/csp-report e ficam nos logs da Vercel.
     'report-uri /api/csp-report',
