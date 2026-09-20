@@ -4,6 +4,11 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Não anuncia "X-Powered-By: Next.js" (informação inútil para o visitante e útil para quem procura versões vulneráveis).
   poweredByHeader: false,
+  // Subresource Integrity: cada script do site sai com `integrity="sha384-..."`, então o navegador se recusa a executar
+  // qualquer arquivo alterado no caminho (CDN comprometida, proxy, cache adulterado). Recurso experimental do Next.
+  experimental: {
+    sri: { algorithm: 'sha384' },
+  },
   async headers() {
     return [
       {

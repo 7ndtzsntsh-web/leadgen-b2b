@@ -9,6 +9,8 @@ export interface SearchLocation {
   isExpansion: boolean;
   /** Complementos de busca (bairros/zonas) que serão combinados com cada termo do nicho. */
   queries: string[];
+  /** "region" = país/estado inteiro: não há uma cidade específica para conferir com o endereço do lead. */
+  scope?: "city" | "region";
 }
 
 const cityAliases: Record<string, string> = {
@@ -84,7 +86,7 @@ export function resolveLocations(rawCity: string, country: string): SearchLocati
   if (!name) {
     const countryNames: Record<string, string> = { br: "Brasil", pt: "Portugal", us: "United States", es: "España" };
     const label = countryNames[country] || "Brasil";
-    return [{ city: label, isExpansion: false, queries: [label] }];
+    return [{ city: label, isExpansion: false, queries: [label], scope: "region" }];
   }
 
   const record = country === "br" ? findCity(name, typedUf) : undefined;
@@ -102,7 +104,7 @@ export function resolveLocations(rawCity: string, country: string): SearchLocati
     for (const neighbor of neighborCities(record)) queue.push(locationFor(neighbor.name, country, true, neighbor));
   } else if (uf && UF_NAMES[uf]) {
     // Cidade fora da base do IBGE: última alternativa é o estado inteiro.
-    queue.push({ city: UF_NAMES[uf], uf, isExpansion: true, queries: [`${UF_NAMES[uf]}, Brasil`] });
+    queue.push({ city: UF_NAMES[uf], uf, isExpansion: true, queries: [`${UF_NAMES[uf]}, Brasil`], scope: "region" });
   }
 
   return queue;

@@ -19,6 +19,10 @@ const SOCIAL_HOSTS = [
   "instagram.com", "facebook.com", "fb.com", "fb.me", "linktr.ee", "linktree.com", "beacons.ai",
   "bio.link", "linkin.bio", "taplink.cc", "wa.me", "whatsapp.com", "tiktok.com", "youtube.com",
   "youtu.be", "twitter.com", "x.com", "linkedin.com", "ifood.com.br", "g.page", "goo.gl", "linktw.in",
+  // Diretórios e marketplaces: a página é da plataforma, não um site próprio da empresa.
+  "tripadvisor.com", "tripadvisor.com.br", "guiamais.com.br", "apontador.com.br", "telelistas.net",
+  "solutudo.com.br", "yelp.com", "foursquare.com", "rappi.com.br", "mercadolivre.com.br", "olx.com.br",
+  "doctoralia.com.br", "booking.com", "airbnb.com.br", "business.google.com", "maps.google.com",
 ];
 
 // Páginas padrão de servidor / domínio estacionado / conta suspensa: existem, mas não são um site.
