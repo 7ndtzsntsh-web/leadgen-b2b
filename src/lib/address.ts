@@ -10,8 +10,15 @@ export interface SearchedArea {
   /** "cidade normalizada|UF" */
   cities: Set<string>;
   ufs: Set<string>;
-  /** Nomes normalizados, para endereços em outros formatos (ex.: OpenStreetMap). */
+  /** Nomes normalizados, para fontes que não informam a UF (ex.: buscas fora do Brasil). */
   names: string[];
+}
+
+/** Cidade e UF que o OpenStreetMap devolve em campos separados (`addressdetails=1`). */
+export interface StructuredAddress {
+  /** Nomes que podem ser o município (city, town, village, municipality). */
+  cities: string[];
+  uf?: string;
 }
 
 export type AddressCheck =
@@ -39,7 +46,7 @@ export function parseAddress(address: string): ParsedAddress {
  * Confere se o endereço do lead está mesmo na área pesquisada. Serve para não dizer "encontrei vocês em Americana"
  * a uma empresa de outra cidade, e para descartar resultados de outro estado.
  */
-export function checkAddress(address: string, area: SearchedArea): AddressCheck {
+export function checkAddress(address: string, area: SearchedArea, place?: StructuredAddress): AddressCheck {
   const { city, uf } = parseAddress(address);
   if (city && uf) {
     if (area.cities.has(areaKey(city, uf))) return { status: "match", city, uf };
@@ -47,8 +54,17 @@ export function checkAddress(address: string, area: SearchedArea): AddressCheck 
     return { status: "other-city", city, uf };
   }
 
-  // Outro formato (ex.: OpenStreetMap "Nome, Rua, Bairro, Cidade, Região, Estado, CEP, Brasil"): procura o nome da cidade.
-  const text = ` ${normalizeText(address).replace(/[^a-z0-9]+/g, " ")} `;
-  const hit = area.names.find((name) => text.includes(` ${name.replace(/[^a-z0-9]+/g, " ").trim()} `));
-  return hit ? { status: "match" } : { status: "unknown" };
+  // OpenStreetMap: usa a cidade e a UF dos campos separados. Procurar o nome da cidade no texto do endereço dava
+  // falso positivo, porque o texto começa com o NOME DA EMPRESA ("Panificadora São José", de Belmonte, passava
+  // como São José) e rua com nome de cidade é comum ("Rua Blumenau"). Sem os campos, não dá para confirmar.
+  if (place && place.cities.length > 0) {
+    const { cities, uf: placeUf } = place;
+    const inArea = (name: string) =>
+      placeUf && area.cities.size > 0 ? area.cities.has(areaKey(name, placeUf)) : area.names.includes(normalizeText(name));
+    const hit = cities.find(inArea);
+    if (hit) return { status: "match", city: hit, uf: placeUf };
+    if (placeUf && area.ufs.size > 0 && !area.ufs.has(placeUf)) return { status: "wrong-state", city: cities[0], uf: placeUf };
+    return { status: "other-city", city: cities[0], uf: placeUf };
+  }
+  return { status: "unknown" };
 }

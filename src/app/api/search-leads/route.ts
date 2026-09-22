@@ -9,7 +9,7 @@ import { inspectWebsite } from '@/lib/domainValidator';
 import { AsyncQueue, runPool } from '@/lib/async';
 import { acquireSlot, guardApi } from '@/lib/apiGuard';
 import { normalizeText } from '@/lib/text';
-import { areaKey, checkAddress, type AddressCheck, type SearchedArea } from '@/lib/address';
+import { areaKey, checkAddress, type AddressCheck, type SearchedArea, type StructuredAddress } from '@/lib/address';
 import { checkEmailDomain } from '@/lib/emailCheck';
 import { buildChecks, isVerified } from '@/lib/verification';
 import { NO_PHONE, cleanPhone, getPhoneType, matchesSiteFilters, pickWhatsApp, scoreLead, type SiteStatus } from '@/lib/leadRules';
@@ -51,7 +51,7 @@ interface GooglePlace {
   businessStatus?: string;
 }
 interface GoogleResponse { places?: GooglePlace[]; nextPageToken?: string }
-interface NominatimPlace { osm_id: number; name?: string; type?: string; display_name: string; extratags?: Record<string, string> }
+interface NominatimPlace { osm_id: number; name?: string; type?: string; display_name: string; address?: Record<string, string>; extratags?: Record<string, string> }
 
 interface RawLead {
   id: string;
@@ -59,6 +59,8 @@ interface RawLead {
   category: string;
   phone: string;
   address: string;
+  /** Cidade/UF em campos separados, quando a fonte informa (OpenStreetMap). Confere a cidade melhor que o texto. */
+  place?: StructuredAddress;
   rating: number;
   reviewsCount: number;
   reviewsKnown: boolean;
@@ -141,7 +143,7 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
   // do endereço é a que vai no texto de abordagem (não a cidade pesquisada).
   let addressCheck: AddressCheck | null = null;
   if (raw.scope !== 'region' && ctx.area.names.length > 0) {
-    addressCheck = checkAddress(raw.address, ctx.area);
+    addressCheck = checkAddress(raw.address, ctx.area, raw.place);
     if (addressCheck.status === 'wrong-state') return;
   }
 
@@ -319,12 +321,17 @@ async function collectFromNominatim(ctx: MiningContext, queue: AsyncQueue<RawLea
             const name = p.name || tags.brand;
             if (!name) continue;
             const whatsapp = tags['contact:whatsapp'] ? pickWhatsApp([tags['contact:whatsapp']], ctx.country, loc.uf) : undefined;
+            const parts = p.address || {};
             acceptPlace(ctx, queue, loc, {
               id: String(p.osm_id),
               name,
               category: (p.type || term).replace(/_/g, ' '),
               phone: cleanPhone(rawPhone, ctx.country, loc.uf),
               address: p.display_name,
+              place: {
+                cities: [parts.city, parts.town, parts.village, parts.municipality].filter((c): c is string => !!c),
+                uf: /^BR-([A-Z]{2})$/.exec(parts['ISO3166-2-lvl4'] || '')?.[1],
+              },
               rating: 0,
               reviewsCount: 0,
               reviewsKnown: false,
