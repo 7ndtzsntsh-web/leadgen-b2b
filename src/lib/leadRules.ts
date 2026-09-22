@@ -179,3 +179,18 @@ export function scoreLead(input: ScoreInput): number {
 
   return Math.max(0, Math.min(score, 100));
 }
+
+/**
+ * Ordem da lista: da maior nota (mais fácil de vender) para a menor.
+ * Empates: verificado primeiro, depois quem tem WhatsApp, depois mais avaliações e, por fim, o nome
+ * (assim a ordem é sempre a mesma para os mesmos leads).
+ */
+export function compareLeads(a: Lead, b: Lead): number {
+  return (
+    b.score - a.score ||
+    Number(!!b.verified) - Number(!!a.verified) ||
+    Number(!!b.whatsapp) - Number(!!a.whatsapp) ||
+    b.reviewsCount - a.reviewsCount ||
+    a.name.localeCompare(b.name, "pt-BR")
+  );
+}

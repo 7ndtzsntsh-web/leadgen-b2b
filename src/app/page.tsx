@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { NO_PHONE, callOf, internationalNumber, matchesSiteFilters, whatsappOf, type Lead } from "@/lib/leadRules";
+import { NO_PHONE, callOf, compareLeads, internationalNumber, matchesSiteFilters, whatsappOf, type Lead } from "@/lib/leadRules";
 import { semanticDictionary, uiTranslations } from "@/lib/semanticDictionary";
 import { buildPitch, pitchLangFor } from "@/lib/pitches";
 
@@ -364,26 +364,26 @@ export default function Home() {
   }, []);
 
   // Os leads chegam um a um; agrupar em lotes evita renderizar a lista inteira a cada lead (pesado no celular).
-  const flushLeads = useCallback((sortByScore = false) => {
+  const flushLeads = useCallback(() => {
     if (flushTimerRef.current !== null) {
       window.clearTimeout(flushTimerRef.current);
       flushTimerRef.current = null;
     }
     const batch = bufferRef.current;
     bufferRef.current = [];
-    if (batch.length === 0 && !sortByScore) return;
+    if (batch.length === 0) return;
     setLeads((prev) => {
       const seen = new Set(prev.map((l) => l.id));
       const merged = [...prev, ...batch.filter((l) => !seen.has(l.id))];
-      // Durante a busca a ordem fica estável (a lista não "pula" sob o dedo); ao final ordena por score.
-      return sortByScore ? merged.sort((a, b) => b.score - a.score) : merged;
+      // Sempre da maior nota (mais fácil de vender) para a menor, inclusive durante a busca.
+      return merged.sort(compareLeads);
     });
   }, []);
 
   const queueLead = useCallback((lead: Lead) => {
     bufferRef.current.push(lead);
     if (flushTimerRef.current === null) {
-      flushTimerRef.current = window.setTimeout(() => flushLeads(false), FLUSH_INTERVAL_MS);
+      flushTimerRef.current = window.setTimeout(() => flushLeads(), FLUSH_INTERVAL_MS);
     }
   }, [flushLeads]);
 
@@ -403,7 +403,7 @@ export default function Home() {
 
   const stopSearch = () => {
     closeStream();
-    flushLeads(true);
+    flushLeads();
     setLoading(false);
     setStatusMessage(t.buttonStop);
   };
@@ -436,7 +436,7 @@ export default function Home() {
     const finish = (message: string) => {
       sse.close();
       if (eventSourceRef.current === sse) eventSourceRef.current = null;
-      flushLeads(true);
+      flushLeads();
       setLoading(false);
       setStatusMessage(message);
     };
@@ -706,7 +706,7 @@ export default function Home() {
                     {t.results}
                     {loading && <span className="flex h-3 w-3 relative"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span></span>}
                   </CardTitle>
-                  <CardDescription className="font-mono text-xs">{leads.length}{loading ? `/${target}` : ""} leads qualificados. {statusMessage}</CardDescription>
+                  <CardDescription className="font-mono text-xs">{leads.length}{loading ? `/${target}` : ""} leads qualificados, ordenados pela nota (maior = mais fácil de vender). {statusMessage}</CardDescription>
                 </div>
                 <div className="flex flex-wrap gap-2 w-full md:w-auto">
                   <Button variant="outline" size="sm" className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white h-11 md:h-7" onClick={handleCopyAllMessages}>
