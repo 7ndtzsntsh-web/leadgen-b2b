@@ -34,6 +34,22 @@ node_modules/.bin/jiti arquivo.ts                   # teste de lógica (não há
   quando ativar. Se ativar, o nome é `GOOGLE_MAPS_API_KEY`, **sem** `NEXT_PUBLIC_` (senão vaza no navegador).
 - Cidade do lead: conferir pelos campos separados do OpenStreetMap (`place`), nunca pelo texto do
   endereço, que começa com o nome da empresa ("Panificadora São José" fica em Belmonte).
+- Busca no OpenStreetMap presa à caixa do município (`cityBox`) e também pelo TIPO de lugar em inglês
+  (`placeTypeTerms`: "bakery"), com páginas extras. A data da última atualização vem da API do OSM (`lastEdits`).
+
+## Qualidade dos dados (o dono reclamou de número errado, "WPP" sem WhatsApp, site não detectado e empresa fechada)
+
+- Telefone (`cleanPhone`): melhor não mostrar do que mostrar errado. Recusa tamanho/começo impossível (ramal
+  colado), põe o 9 no celular antigo, lê `mobile`/`contact:mobile` e separa vários números no mesmo campo.
+- WhatsApp: `lead.whatsapp` é SÓ o confirmado (link no site da empresa ou campo de WhatsApp do cadastro).
+  Celular sem confirmação aparece como "CEL" + "Testar WPP". Nunca rotular celular como "WPP".
+- O site da própria empresa é a fonte mais atual: confirma o telefone do cadastro ou o substitui. O leitor
+  lê até 800 KB, porque o contato costuma ficar no rodapé depois de muito CSS.
+- WhatsApp do site: vale o mais repetido; o que vem depois de "desenvolvido por" é da agência e é ignorado.
+- Busca de site pelo nome (`siteFinder`): exige nome + telefone, ou nome composto + cidade. Não afrouxar:
+  num teste, 78 de 96 nomes batiam com domínio de OUTRA empresa.
+- Cadastro sem atualização há 8+ anos e sem site no ar: descartado. Há 5+ anos: aparece com "Dados de AAAA".
+- Toda frase de checagem tem que ser verdadeira: "confirmado" só quando houve confirmação de verdade.
 - Celular: alvos de toque com 44px (`h-11 md:h-8`); campos com letra de 16px (o iPhone não dá zoom).
 - PRs do Dependabot com salto grande de versão: decisão do dono.
 

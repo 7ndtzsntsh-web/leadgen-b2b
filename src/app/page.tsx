@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { NO_PHONE, callOf, compareLeads, internationalNumber, matchesSiteFilters, whatsappOf, type Lead } from "@/lib/leadRules";
+import { NO_PHONE, callOf, compareLeads, getPhoneType, internationalNumber, matchesSiteFilters, sameNumber, whatsappOf, type Lead } from "@/lib/leadRules";
 import { semanticDictionary, uiTranslations } from "@/lib/semanticDictionary";
 import { buildPitch, pitchLangFor } from "@/lib/pitches";
 
@@ -88,14 +88,46 @@ interface LeadItemProps {
 }
 
 /**
- * O WhatsApp tem prioridade: `wpp` é o número que abre no WhatsApp (o achado no site, ou o próprio telefone
- * se for celular) e `call` é o número para ligar (fixo, ou outro telefone). `plain` é o telefone comum a exibir.
+ * `wpp` abre no WhatsApp: o confirmado ou, se não houver, o celular (aí o botão diz "Testar", porque pode não ter
+ * WhatsApp). `call` é o número para ligar. `numbers` são os telefones a exibir além do WhatsApp confirmado.
  */
 function contactOf(lead: Lead) {
   const wpp = whatsappOf(lead);
   const call = callOf(lead);
-  const plain = call ?? (!lead.whatsapp && lead.phone !== NO_PHONE ? lead.phone : undefined);
-  return { wpp, call, plain };
+  const numbers = [lead.phone, ...(lead.otherPhones ?? [])].filter(
+    (n) => n !== NO_PHONE && !(lead.whatsapp && sameNumber(n, lead.whatsapp))
+  );
+  return { wpp, wppConfirmed: !!lead.whatsapp, call, numbers };
+}
+
+/** Tipo do número. Celular sem WhatsApp confirmado é "CEL", nunca "WPP": era isso que enganava. */
+function PhoneKind({ phone }: { phone: string }) {
+  const kind = getPhoneType(phone, "br");
+  if (kind === "MOBILE") {
+    return (
+      <Badge variant="outline" title="Celular: WhatsApp não confirmado" className="bg-gray-500/10 text-gray-300 border-gray-500/30 text-[9px] mr-2 px-1">
+        CEL
+      </Badge>
+    );
+  }
+  if (kind === "LANDLINE") {
+    return <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/30 text-[9px] mr-2 px-1">FIXO</Badge>;
+  }
+  return null;
+}
+
+/** Cadastro sem atualização há 5 anos ou mais: a empresa pode ter fechado ou trocado de número. */
+function StaleBadge({ lead }: { lead: Lead }) {
+  if (!lead.staleSince) return null;
+  return (
+    <Badge
+      variant="outline"
+      title="Cadastro sem atualização há anos: a empresa pode ter fechado ou trocado de número"
+      className="bg-yellow-500/10 text-yellow-400 border-yellow-500/30 text-[9px] px-1 uppercase whitespace-nowrap"
+    >
+      ⚠ Dados de {lead.staleSince}
+    </Badge>
+  );
 }
 
 /**
@@ -136,20 +168,23 @@ function VerificationDetails({ lead }: { lead: Lead }) {
 }
 
 const LeadCard = memo(function LeadCard({ lead, copied, onCopy, onWhatsApp, onCall }: LeadItemProps) {
-  const { wpp, call, plain } = contactOf(lead);
+  const { wpp, wppConfirmed, call, numbers } = contactOf(lead);
   return (
     <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-3 relative overflow-hidden">
       {lead.isExpansion && <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>}
       <div>
         <div className="font-medium text-white text-lg flex items-center gap-2">{lead.name}</div>
         <div className="text-xs text-muted-foreground mt-1">{lead.category}</div>
+        {lead.staleSince && <div className="mt-1"><StaleBadge lead={lead} /></div>}
         <div className="mt-2"><VerificationDetails lead={lead} /></div>
         {lead.isExpansion && <div className="text-[10px] text-indigo-400 mt-1">🚀 EXPANSÃO: {lead.expansionSource}</div>}
       </div>
 
       <div className="flex flex-col gap-1 text-sm text-gray-300">
         {lead.whatsapp && <div className="flex items-center gap-2 text-[#25D366]"><MessageCircle className="w-3 h-3" /> {lead.whatsapp}</div>}
-        {plain && <div className="flex items-center gap-2"><Phone className="w-3 h-3 text-muted-foreground" /> {plain}</div>}
+        {numbers.map((n) => (
+          <div key={n} className="flex items-center gap-2"><Phone className="w-3 h-3 text-muted-foreground" /> <span className="flex items-center"><PhoneKind phone={n} />{n}</span></div>
+        ))}
         {lead.email !== "N/D" && <div className="flex items-center gap-2"><Mail className="w-3 h-3 text-muted-foreground" /> <span className="truncate">{lead.email}</span></div>}
         <div className="flex items-center gap-2"><MapPin className="w-3 h-3 text-muted-foreground flex-shrink-0" /> <span className="truncate">{lead.address}</span></div>
       </div>
@@ -173,7 +208,7 @@ const LeadCard = memo(function LeadCard({ lead, copied, onCopy, onWhatsApp, onCa
         </Button>
         {wpp && (
           <Button variant="default" className="bg-[#25D366]/20 text-[#25D366] border-[#25D366]/50 text-xs h-11" onClick={() => onWhatsApp(lead)}>
-            <MessageCircle className="w-3 h-3 mr-1" /> WPP
+            <MessageCircle className="w-3 h-3 mr-1" /> {wppConfirmed ? "WPP" : "Testar WPP"}
           </Button>
         )}
         {call && (
@@ -187,7 +222,7 @@ const LeadCard = memo(function LeadCard({ lead, copied, onCopy, onWhatsApp, onCa
 });
 
 const LeadRow = memo(function LeadRow({ lead, copied, onCopy, onWhatsApp, onCall }: LeadItemProps) {
-  const { wpp, call, plain } = contactOf(lead);
+  const { wpp, wppConfirmed, call, numbers } = contactOf(lead);
   return (
     <TableRow className={`border-white/10 hover:bg-white/5 transition-colors group ${lead.isExpansion ? "bg-indigo-900/10" : ""}`}>
       <TableCell>
@@ -198,6 +233,7 @@ const LeadRow = memo(function LeadRow({ lead, copied, onCopy, onWhatsApp, onCall
               🚀 EXPANSÃO: {lead.expansionSource}
             </Badge>
           )}
+          <StaleBadge lead={lead} />
         </div>
         <div className="text-[10px] uppercase font-mono tracking-wider text-muted-foreground mt-1 mb-1">{lead.category}</div>
         <div className="mt-1"><VerificationDetails lead={lead} /></div>
@@ -209,16 +245,12 @@ const LeadRow = memo(function LeadRow({ lead, copied, onCopy, onWhatsApp, onCall
               {lead.whatsapp}
             </div>
           )}
-          {plain && (
-            <div className="text-sm font-mono text-white flex items-center">
-              {lead.phoneType === "MOBILE" && !lead.whatsapp ? (
-                <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/30 text-[9px] mr-2 px-1">WPP</Badge>
-              ) : lead.phoneType === "LANDLINE" ? (
-                <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/30 text-[9px] mr-2 px-1">FIXO</Badge>
-              ) : null}
-              {plain}
+          {numbers.map((n) => (
+            <div key={n} className="text-sm font-mono text-white flex items-center">
+              <PhoneKind phone={n} />
+              {n}
             </div>
-          )}
+          ))}
         </div>
 
         <div className="text-xs text-muted-foreground flex items-center mt-2">
@@ -289,7 +321,7 @@ const LeadRow = memo(function LeadRow({ lead, copied, onCopy, onWhatsApp, onCall
               className="bg-[#25D366]/20 text-[#25D366] border border-[#25D366]/50 hover:bg-[#25D366] hover:text-white transition-all shadow-[0_0_10px_rgba(37,211,102,0.1)] hover:shadow-[0_0_20px_rgba(37,211,102,0.4)] text-[10px] h-7 w-24 flex justify-between"
               onClick={() => onWhatsApp(lead)}
             >
-              WhatsApp
+              {wppConfirmed ? "WhatsApp" : "Testar WPP"}
               <MessageCircle className="w-3 h-3 ml-1" />
             </Button>
           )}
@@ -505,7 +537,8 @@ export default function Home() {
     const headers = [
       "Nome", "Segmento", "Origem (Expansão)", "DDD", "Telefone (Fixo/WPP)", "Tipo Tel", "WhatsApp",
       "E-mail do site (domínio recebe e-mails)", "Endereço Completo", "Cidade (do endereço)", "Status do Site", "URL",
-      "Avaliação Google", "Score", "Verificação", "Checagens",
+      "Avaliação Google", "Score", "Verificação", "Checagens", "WhatsApp confirmado", "Outros telefones",
+      "Cadastro sem atualização desde",
     ];
 
     const rows = leads.map((l) => {
@@ -522,6 +555,7 @@ export default function Home() {
         l.phoneType || "UNKNOWN", whatsappOf(l) ?? "", l.email, l.address, l.city ?? "", l.siteStatus, l.website || "",
         l.rating > 0 ? l.rating : "", l.score, l.verified ? "VERIFICADO" : "PARCIAL",
         (l.checks ?? []).map((c) => `${c.ok ? "OK" : "PENDENTE"}: ${c.detail}`).join(" | "),
+        l.whatsapp ? "Sim" : "Não", (l.otherPhones ?? []).join(" / "), l.staleSince ?? "",
       ].map(csvCell).join(";");
     });
 
