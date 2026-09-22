@@ -601,10 +601,10 @@ export default function Home() {
                     <div className="space-y-2">
                       <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">{t.niche}</label>
                       <div className="relative">
-                        <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Search className="absolute left-3 top-3.5 md:top-2.5 h-4 w-4 text-muted-foreground" />
                         <Input
                           placeholder={t.nichePlaceholder}
-                          className="pl-9 bg-black/20 border-white/10 text-white placeholder:text-muted-foreground focus-visible:ring-primary/50"
+                          className="pl-9 h-11 md:h-8 bg-black/20 border-white/10 text-white placeholder:text-muted-foreground focus-visible:ring-primary/50"
                           value={category}
                           onChange={(e) => setCategory(e.target.value)}
                           onKeyDown={(e) => e.key === "Enter" && startSearch()}
@@ -635,7 +635,7 @@ export default function Home() {
                           placeholder={t.cityPlaceholder}
                           value={city}
                           onChange={(e) => setCity(e.target.value)}
-                          className="bg-black/20 border-white/10 flex-1"
+                          className="bg-black/20 border-white/10 flex-1 h-11 md:h-8"
                           onKeyDown={(e) => e.key === "Enter" && startSearch()}
                           list="city-suggestions"
                           enterKeyHint="search"
