@@ -26,6 +26,8 @@ export interface CnpjCompany {
   /** Telefones como vieram da Receita (DDD + número, só dígitos). */
   phones: string[];
   email: string;
+  /** Site ou rede social que o OpenStreetMap tem para esta empresa (a Receita não tem site). */
+  site: string;
 }
 
 interface NicheRule {
@@ -69,7 +71,7 @@ async function fetchJson(url: string): Promise<unknown | null> {
 }
 
 interface CityFile {
-  linhas: [string, string, string, string, string, string, string, string[], string][];
+  linhas: [string, string, string, string, string, string, string, string[], string, string?][];
 }
 
 const cache = new Map<string, Promise<CnpjCompany[] | null>>();
@@ -83,7 +85,7 @@ export function loadCity(origin: string, uf: string, city: string): Promise<Cnpj
   const pending = (async () => {
     const data = ((await fetchJson(`${origin}${path}`)) ?? (await fetchJson(`${RAW_BASE}${path}`))) as CityFile | null;
     if (!data?.linhas) return null;
-    return data.linhas.map(([cnpj, name, cnae, inicio, street, district, cep, phones, email]) => ({
+    return data.linhas.map(([cnpj, name, cnae, inicio, street, district, cep, phones, email, site]) => ({
       cnpj,
       name,
       cnae,
@@ -93,6 +95,7 @@ export function loadCity(origin: string, uf: string, city: string): Promise<Cnpj
       cep,
       phones,
       email,
+      site: site ?? "",
     }));
   })();
 
