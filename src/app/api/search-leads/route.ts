@@ -3,16 +3,21 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 import { NextRequest } from 'next/server';
-import { expandSearchTerm } from '@/lib/semanticDictionary';
+import { expandSearchTerm, placeTypeTerms } from '@/lib/semanticDictionary';
 import { resolveLocations, type SearchLocation } from '@/lib/locations';
-import { inspectWebsite } from '@/lib/domainValidator';
+import { inspectWebsite, type SiteInspection } from '@/lib/domainValidator';
 import { AsyncQueue, runPool } from '@/lib/async';
 import { acquireSlot, guardApi } from '@/lib/apiGuard';
 import { normalizeText } from '@/lib/text';
 import { areaKey, checkAddress, type AddressCheck, type SearchedArea, type StructuredAddress } from '@/lib/address';
 import { checkEmailDomain } from '@/lib/emailCheck';
-import { buildChecks, isVerified } from '@/lib/verification';
-import { NO_PHONE, cleanPhone, getPhoneType, matchesSiteFilters, pickWhatsApp, scoreLead, type SiteStatus } from '@/lib/leadRules';
+import { candidateDomains, findOwnWebsite } from '@/lib/siteFinder';
+import { UF_NAMES } from '@/lib/ufData';
+import { buildChecks, isOwnSiteLive, isVerified, yearsSince, type PhoneOrigin, type WhatsAppOrigin } from '@/lib/verification';
+import {
+  NO_PHONE, cleanPhone, cleanPhones, getPhoneType, matchesSiteFilters, pickWhatsApp, sameNumber, scoreLead, splitPhones,
+  type SiteStatus,
+} from '@/lib/leadRules';
 
 const GOOGLE_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const PLACES_URL = process.env.PLACES_API_URL || 'https://places.googleapis.com/v1/places:searchText';
@@ -38,6 +43,20 @@ const DRY_STREAK_LIMIT = 6;       // para de varrer zonas quando N consultas seg
 const HEARTBEAT_MS = 10_000;      // evita que a conexão SSE seja derrubada por inatividade (comum em rede móvel)
 const SOFT_DEADLINE_MS = 270_000; // encerra com resumo antes do limite da plataforma (300s)
 
+// OpenStreetMap (fonte gratuita, sem chave)
+const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
+const OSM_API_URL = 'https://api.openstreetmap.org/api/0.6';
+const OSM_HEADERS = { 'User-Agent': 'LeadGenPro-B2B-App/5.0' };
+const NOMINATIM_PAGE = 40;        // máximo que o Nominatim devolve por consulta
+const NOMINATIM_MAX_PAGES = 3;    // páginas por tipo de negócio dentro da cidade
+const OSM_API_TIMEOUT_MS = 8000;
+// Categorias do OpenStreetMap que são negócios (o resto é rua, bairro, rio, limite de cidade...).
+const BUSINESS_CATEGORIES = new Set(['amenity', 'shop', 'craft', 'office', 'leisure', 'tourism', 'healthcare', 'club', 'man_made']);
+// Cadastro sem nenhuma atualização há tantos anos, e sem site no ar: provavelmente fechou. Não é mostrado.
+const STALE_DROP_YEARS = 8;
+// A partir daqui o lead aparece com aviso de dados antigos.
+const STALE_WARN_YEARS = 5;
+
 interface GooglePlace {
   id: string;
   displayName?: { text?: string };
@@ -51,13 +70,28 @@ interface GooglePlace {
   businessStatus?: string;
 }
 interface GoogleResponse { places?: GooglePlace[]; nextPageToken?: string }
-interface NominatimPlace { osm_id: number; name?: string; type?: string; display_name: string; address?: Record<string, string>; extratags?: Record<string, string> }
+interface NominatimPlace {
+  place_id: number;
+  osm_type?: string;
+  osm_id: number;
+  category?: string;
+  type?: string;
+  name?: string;
+  display_name: string;
+  boundingbox?: string[];
+  address?: Record<string, string>;
+  extratags?: Record<string, string>;
+}
 
 interface RawLead {
   id: string;
+  source: 'google' | 'osm';
   name: string;
   category: string;
+  /** Telefone principal (o celular, quando há: é o canal da abordagem). */
   phone: string;
+  /** Outros números válidos da empresa (ex.: o fixo). */
+  otherPhones?: string[];
   address: string;
   /** Cidade/UF em campos separados, quando a fonte informa (OpenStreetMap). Confere a cidade melhor que o texto. */
   place?: StructuredAddress;
@@ -71,6 +105,10 @@ interface RawLead {
   uf?: string;
   /** A fonte informou que a empresa está em funcionamento (Google: businessStatus = OPERATIONAL). */
   activeConfirmed: boolean;
+  /** Última atualização do cadastro no OpenStreetMap (data ISO). */
+  lastEdit?: string;
+  /** Última conferência no local por um colaborador do mapa (check_date, data ISO). */
+  checkedOn?: string;
   /** Busca por região inteira: não há cidade específica para conferir com o endereço. */
   scope?: 'city' | 'region';
   isExpansion: boolean;
@@ -147,16 +185,60 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
     if (addressCheck.status === 'wrong-state') return;
   }
 
+  const listedPhones = [raw.phone, ...(raw.otherPhones ?? [])].filter((p) => p !== NO_PHONE);
+
+  // Sem site no cadastro: procura pelo nome (padariaxyz.com.br), aceitando só o que for comprovadamente da empresa.
+  let website = raw.website;
+  let siteFound: string | undefined;
+  let siteSearched: string[] | undefined;
+  if (!website && raw.source === 'osm') {
+    const city = addressCheck && 'city' in addressCheck && addressCheck.city ? addressCheck.city : raw.expansionSource;
+    siteFound = await findOwnWebsite(raw.name, { phones: listedPhones, city, country: ctx.country });
+    website = siteFound;
+    if (!siteFound) siteSearched = candidateDomains(raw.name, ctx.country).hosts;
+  }
+
   let siteStatus: SiteStatus = 'Sem Site';
   let email = 'N/D';
-  let whatsapp = raw.whatsapp;
-  if (raw.website) {
-    const inspection = await inspectWebsite(raw.website);
+  let inspection: SiteInspection | undefined;
+  if (website) {
+    inspection = await inspectWebsite(website);
     siteStatus = inspection.status;
     email = inspection.email;
-    // O WhatsApp do próprio site/perfil da empresa tem prioridade sobre o telefone (pode ser fixo).
-    whatsapp = pickWhatsApp(inspection.whatsapp, ctx.country, raw.uf) ?? whatsapp;
   }
+  const siteLive = isOwnSiteLive(siteStatus);
+
+  // Telefone: o site da própria empresa é a fonte mais atual. Número do cadastro que aparece no site = confirmado;
+  // se o site mostra OUTRO número, vale o do site (era de onde vinham os "números errados").
+  let phone = raw.phone;
+  let otherPhones = raw.otherPhones ?? [];
+  let phoneOrigin: PhoneOrigin = raw.source === 'google' ? 'google' : 'cadastro';
+  let phoneReplaced = false;
+  const sitePhones = siteLive && inspection ? cleanPhones(inspection.phones, ctx.country, raw.uf) : [];
+  if (sitePhones.length > 0) {
+    if (listedPhones.some((p) => sitePhones.some((s) => sameNumber(s, p)))) {
+      phoneOrigin = 'confirmado';
+    } else if (raw.source === 'osm') {
+      phone = sitePhones.find((s) => getPhoneType(s, ctx.country) === 'MOBILE') ?? sitePhones[0];
+      otherPhones = sitePhones.filter((s) => !sameNumber(s, phone)).slice(0, 2);
+      phoneOrigin = 'site';
+      phoneReplaced = listedPhones.length > 0;
+    }
+  }
+
+  // WhatsApp confirmado: link no site/perfil da empresa (o mais repetido) ou o campo de WhatsApp do cadastro.
+  let whatsapp = raw.whatsapp;
+  let whatsappOrigin: WhatsAppOrigin | undefined = raw.whatsapp ? 'cadastro' : undefined;
+  const siteWhatsApp = inspection ? pickWhatsApp(inspection.whatsapp, ctx.country, raw.uf) : undefined;
+  if (siteWhatsApp) {
+    whatsapp = siteWhatsApp;
+    whatsappOrigin = 'site';
+  }
+
+  // Empresa que provavelmente fechou: cadastro parado há anos e nenhum sinal de vida (site no ar, conferência recente).
+  const lastSeen = [raw.lastEdit, raw.checkedOn].filter((d): d is string => !!d).sort().pop();
+  const ageYears = lastSeen && !siteLive && !raw.activeConfirmed ? yearsSince(lastSeen) : undefined;
+  if (ageYears !== undefined && ageYears >= STALE_DROP_YEARS) return;
 
   // O domínio do e-mail precisa existir e receber mensagens; senão o e-mail é descartado (não vai para o lead).
   let emailDomain: 'ok' | 'unknown' | undefined;
@@ -168,29 +250,38 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
 
   // Depois de cada await a meta pode já ter sido atingida por outro lead.
   if (ctx.isDone()) return;
-  if (raw.phone === NO_PHONE && email === 'N/D' && !whatsapp) return;
+  if (phone === NO_PHONE && email === 'N/D' && !whatsapp) return;
   if (!matchesSiteFilters(siteStatus, ctx.onlyNoSite, ctx.onlyInsecure)) return;
 
+  const phoneType = getPhoneType(phone, ctx.country);
   const checks = buildChecks({
-    phone: raw.phone !== NO_PHONE ? raw.phone : undefined,
+    phone: phone !== NO_PHONE ? phone : undefined,
+    phoneOrigin,
+    phoneReplaced,
     uf: ctx.country === 'br' ? raw.uf : undefined,
     whatsapp,
+    whatsappOrigin,
+    unconfirmedMobile: !whatsapp && phoneType === 'MOBILE',
     email: emailDomain,
     siteStatus,
+    siteFound,
+    siteSearched,
     activeConfirmed: raw.activeConfirmed,
+    lastEdit: raw.lastEdit,
+    checkedOn: raw.checkedOn,
     address: addressCheck,
   });
 
-  const phoneType = getPhoneType(raw.phone, ctx.country);
   const score = scoreLead({
     siteStatus,
     rating: raw.rating,
     reviewsCount: raw.reviewsCount,
     reviewsKnown: raw.reviewsKnown,
-    // Com WhatsApp confirmado, o lead é alcançável pelo canal principal mesmo que o telefone seja fixo.
-    phoneType: whatsapp ? 'MOBILE' : phoneType,
-    hasPhone: raw.phone !== NO_PHONE || !!whatsapp,
+    whatsappConfirmed: !!whatsapp,
+    phoneType,
+    hasPhone: phone !== NO_PHONE || !!whatsapp,
     hasEmail: email !== 'N/D',
+    ageYears,
   });
 
   ctx.streamed++;
@@ -200,17 +291,19 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
       id: raw.id,
       name: raw.name,
       category: raw.category,
-      phone: raw.phone,
+      phone,
+      otherPhones: otherPhones.length ? otherPhones : undefined,
       address: raw.address,
       rating: raw.rating,
       reviewsCount: raw.reviewsCount,
-      website: raw.website,
+      website,
       isExpansion: raw.isExpansion,
       expansionSource: raw.expansionSource,
       siteStatus,
       email,
       phoneType,
       whatsapp,
+      staleSince: ageYears !== undefined && ageYears >= STALE_WARN_YEARS && lastSeen ? Number(lastSeen.slice(0, 4)) : undefined,
       city: addressCheck && 'city' in addressCheck ? addressCheck.city : undefined,
       checks,
       verified: isVerified(checks),
@@ -265,6 +358,7 @@ async function collectFromGoogle(ctx: MiningContext, queue: AsyncQueue<RawLead>,
         const closed = !!p.businessStatus && p.businessStatus !== 'OPERATIONAL';
         const isNew = acceptPlace(ctx, queue, loc, {
           id: p.id,
+          source: 'google',
           name: p.displayName?.text || 'Desconhecido',
           category: p.primaryTypeDisplayName?.text || (p.primaryType || term).replace(/_/g, ' '),
           phone: cleanPhone(p.nationalPhoneNumber || NO_PHONE, ctx.country, loc.uf),
@@ -302,51 +396,151 @@ async function collectFromGoogle(ctx: MiningContext, queue: AsyncQueue<RawLead>,
 // Coleta: OpenStreetMap / Nominatim (fallback sem chave do Google; sem avaliações reais)
 // ---------------------------------------------------------------------------
 
-async function collectFromNominatim(ctx: MiningContext, queue: AsyncQueue<RawLead>, loc: SearchLocation, terms: string[]): Promise<void> {
-  // O Nominatim aceita só 1 consulta por segundo e não entende "Zona Norte, Cidade": só a cidade inteira (1ª consulta)
-  // traz resultados. Repetir cada termo em várias zonas só multiplicava a espera (20 s+ por cidade pequena).
-  for (const zone of loc.queries.slice(0, 1)) {
-    for (const term of terms) {
+/** Uma consulta ao Nominatim. Espera 1 s depois: o limite de uso é 1 consulta por segundo. */
+async function nominatim(params: Record<string, string>): Promise<NominatimPlace[]> {
+  try {
+    const res = await fetch(`${NOMINATIM_URL}?${new URLSearchParams({ format: 'jsonv2', addressdetails: '1', extratags: '1', ...params })}`, {
+      headers: OSM_HEADERS,
+    });
+    return res.ok ? ((await res.json()) as NominatimPlace[]) : [];
+  } catch (error) {
+    console.error('Nominatim error:', error);
+    return [];
+  } finally {
+    await sleep(1000);
+  }
+}
+
+/** Caixa (viewbox) do município, para buscar só dentro dele. Sem ela, a busca volta a ser "termo + cidade". */
+async function cityBox(loc: SearchLocation, country: string): Promise<string | undefined> {
+  if (loc.scope === 'region') return undefined;
+  const q = [loc.city, loc.uf ? UF_NAMES[loc.uf] : undefined].filter(Boolean).join(', ');
+  const found = await nominatim({ q, countrycodes: country, limit: '5', addressdetails: '0', extratags: '0' });
+  const city = normalizeText(loc.city);
+  const hit = found.find((p) => (p.category === 'boundary' || p.category === 'place') && normalizeText(p.name ?? '') === city);
+  if (hit?.boundingbox?.length !== 4) return undefined;
+  const [south, north, west, east] = hit.boundingbox;
+  return `${west},${north},${east},${south}`;
+}
+
+/**
+ * Data da última atualização de cada lugar, direto do banco do OpenStreetMap (uma consulta por tipo, para a
+ * página inteira). O Nominatim não informa essa data, e é ela que denuncia cadastro abandonado.
+ */
+async function lastEdits(places: NominatimPlace[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const byType = new Map<string, number[]>();
+  for (const p of places) {
+    if (p.osm_type === 'node' || p.osm_type === 'way' || p.osm_type === 'relation') {
+      byType.set(p.osm_type, [...(byType.get(p.osm_type) ?? []), p.osm_id]);
+    }
+  }
+  await Promise.all([...byType].map(async ([type, ids]) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), OSM_API_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${OSM_API_URL}/${type}s.json?${type}s=${ids.join(',')}`, { headers: OSM_HEADERS, signal: controller.signal });
+      if (!res.ok) return;
+      const data = (await res.json()) as { elements?: { type: string; id: number; timestamp?: string }[] };
+      for (const e of data.elements ?? []) if (e.timestamp) out.set(`${e.type}/${e.id}`, e.timestamp);
+    } catch {
+      /* sem a data: o lead segue, só sem o sinal de cadastro antigo */
+    } finally {
+      clearTimeout(timer);
+    }
+  }));
+  return out;
+}
+
+/** Marcado como fechado no mapa: disused:shop, end_date passada, horário "closed". */
+function isMarkedClosed(tags: Record<string, string>, today: string): boolean {
+  if (Object.keys(tags).some((k) => /^(disused|was|abandoned):(shop|amenity|craft|office|leisure|tourism|healthcare)$/.test(k))) return true;
+  if (tags.disused === 'yes' || tags.abandoned === 'yes') return true;
+  if (tags.end_date && tags.end_date <= today) return true;
+  return /^\s*(closed|off)\s*$/i.test(tags.opening_hours ?? '');
+}
+
+/** Perfil de Instagram/Facebook do cadastro. Antes era ignorado e a empresa aparecia "sem site". */
+function socialProfile(tags: Record<string, string>): string | undefined {
+  const profile = (value: string, host: string) => (/^https?:\/\//i.test(value) ? value : `https://${host}/${value.replace(/^@/, '').trim()}`);
+  const insta = tags['contact:instagram'] || tags.instagram;
+  if (insta) return profile(insta, 'instagram.com');
+  const facebook = tags['contact:facebook'] || tags.facebook;
+  return facebook ? profile(facebook, 'facebook.com') : undefined;
+}
+
+/** Última conferência no local registrada no mapa (check_date e variações). */
+function checkDateOf(tags: Record<string, string>): string | undefined {
+  return ['check_date', 'check_date:opening_hours', 'survey:date', 'survey_date']
+    .map((k) => tags[k])
+    .filter((d): d is string => !!d && /^\d{4}(-\d{2}(-\d{2})?)?$/.test(d))
+    .sort()
+    .pop();
+}
+
+function toRawLead(ctx: MiningContext, loc: SearchLocation, p: NominatimPlace, term: string, lastEdit?: string): RawLead | null {
+  const tags = p.extratags || {};
+  const name = p.name || tags.brand;
+  if (!name) return null;
+  // Todos os campos de telefone, inclusive "mobile" (antes ignorado) e vários números no mesmo campo.
+  const phones = cleanPhones([tags['contact:mobile'], tags.mobile, tags.phone, tags['contact:phone']], ctx.country, loc.uf);
+  const phone = phones.find((ph) => getPhoneType(ph, ctx.country) === 'MOBILE') ?? phones[0] ?? NO_PHONE;
+  const parts = p.address || {};
+  return {
+    id: `${p.osm_type ?? 'osm'}/${p.osm_id}`,
+    source: 'osm',
+    name,
+    category: (p.type || term).replace(/_/g, ' '),
+    phone,
+    otherPhones: phones.filter((ph) => ph !== phone),
+    address: p.display_name,
+    place: {
+      cities: [parts.city, parts.town, parts.village, parts.municipality].filter((c): c is string => !!c),
+      uf: /^BR-([A-Z]{2})$/.exec(parts['ISO3166-2-lvl4'] || '')?.[1],
+    },
+    rating: 0,
+    reviewsCount: 0,
+    reviewsKnown: false,
+    activeConfirmed: false, // o OpenStreetMap não informa se a empresa ainda funciona
+    website: tags.website || tags['contact:website'] || tags.url || socialProfile(tags),
+    whatsapp: pickWhatsApp(splitPhones(tags['contact:whatsapp']), ctx.country, loc.uf),
+    lastEdit,
+    checkedOn: checkDateOf(tags),
+    isExpansion: loc.isExpansion,
+    expansionSource: loc.city,
+  };
+}
+
+async function collectFromNominatim(
+  ctx: MiningContext, queue: AsyncQueue<RawLead>, loc: SearchLocation, terms: string[], typeTerms: string[]
+): Promise<void> {
+  // Presa à caixa do município: não vem empresa de outra cidade só porque o nome é parecido, e cabem mais resultados.
+  // Os termos em inglês ("bakery") trazem pelo TIPO de lugar, inclusive quem não tem "padaria" no nome.
+  const box = await cityBox(loc, ctx.country);
+  const zone = loc.queries[0] ?? '';
+  const searches = box
+    ? [terms[0], ...typeTerms, ...terms.slice(1)].map((q) => ({ q, viewbox: box, bounded: '1' }))
+    : terms.map((t) => ({ q: `${t} ${zone}`.trim() }));
+  const today = new Date().toISOString().slice(0, 10);
+
+  for (const search of searches) {
+    const shown: number[] = [];
+    for (let page = 0; page < NOMINATIM_MAX_PAGES; page++) {
       if (ctx.isDone()) return;
-      try {
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(`${term} ${zone}`.trim())}&format=json&addressdetails=1&extratags=1&limit=20`,
-          { headers: { 'User-Agent': 'LeadGenPro-B2B-App/5.0' } }
-        );
-        if (res.ok) {
-          const data = (await res.json()) as NominatimPlace[];
-          for (const p of data) {
-            const tags = p.extratags || {};
-            const rawPhone = tags.phone || tags['contact:phone'] || NO_PHONE;
-            const name = p.name || tags.brand;
-            if (!name) continue;
-            const whatsapp = tags['contact:whatsapp'] ? pickWhatsApp([tags['contact:whatsapp']], ctx.country, loc.uf) : undefined;
-            const parts = p.address || {};
-            acceptPlace(ctx, queue, loc, {
-              id: String(p.osm_id),
-              name,
-              category: (p.type || term).replace(/_/g, ' '),
-              phone: cleanPhone(rawPhone, ctx.country, loc.uf),
-              address: p.display_name,
-              place: {
-                cities: [parts.city, parts.town, parts.village, parts.municipality].filter((c): c is string => !!c),
-                uf: /^BR-([A-Z]{2})$/.exec(parts['ISO3166-2-lvl4'] || '')?.[1],
-              },
-              rating: 0,
-              reviewsCount: 0,
-              reviewsKnown: false,
-              activeConfirmed: false, // o OpenStreetMap não informa se a empresa ainda funciona
-              website: tags.website || tags['contact:website'] || tags.url,
-              whatsapp,
-              isExpansion: loc.isExpansion,
-              expansionSource: loc.city,
-            }, false);
-          }
-        }
-      } catch (error) {
-        console.error('Nominatim error:', error);
+      const data = await nominatim({
+        ...search,
+        countrycodes: ctx.country,
+        limit: String(NOMINATIM_PAGE),
+        ...(shown.length ? { exclude_place_ids: shown.join(',') } : {}),
+      });
+      shown.push(...data.map((p) => p.place_id));
+      const places = data.filter((p) => BUSINESS_CATEGORIES.has(p.category ?? '') && !isMarkedClosed(p.extratags ?? {}, today));
+      const edits = await lastEdits(places.filter((p) => !ctx.seenIds.has(`${p.osm_type}/${p.osm_id}`)));
+      for (const p of places) {
+        const raw = toRawLead(ctx, loc, p, search.q, edits.get(`${p.osm_type}/${p.osm_id}`));
+        if (raw) acceptPlace(ctx, queue, loc, raw, false);
       }
-      await sleep(1000); // limite de uso do Nominatim
+      if (!box || data.length < NOMINATIM_PAGE) break; // página incompleta: não há mais
     }
   }
 }
@@ -390,6 +584,7 @@ export async function GET(req: NextRequest) {
   if (!releaseSlot) return streamNotice('Você já tem buscas em andamento. Aguarde terminar ou interrompa uma delas.');
 
   const terms = expandSearchTerm(term, country);
+  const typeTerms = placeTypeTerms(term).filter((t) => !terms.includes(t.toLowerCase()));
   const locations = resolveLocations(rawCity, country);
 
   const encoder = new TextEncoder();
@@ -438,7 +633,7 @@ export async function GET(req: NextRequest) {
 
           try {
             if (GOOGLE_API_KEY) await collectFromGoogle(ctx, queue, loc, terms);
-            else await collectFromNominatim(ctx, queue, loc, terms);
+            else await collectFromNominatim(ctx, queue, loc, terms, typeTerms);
           } finally {
             queue.close();
           }

@@ -174,3 +174,12 @@ export const uiTranslations: Record<string, Record<string, string>> = {
     copyAll: "Copiar Todo"
   }
 };
+
+/**
+ * Nomes em inglês do tipo de negócio ("bakery", "restaurant"). O OpenStreetMap entende esses nomes como TIPO
+ * de lugar: "bakery" traz todas as padarias da cidade, inclusive as que não têm "padaria" no nome.
+ */
+export function placeTypeTerms(term: string): string[] {
+  const key = findDictionaryKey(term);
+  return key ? (semanticDictionary[key].us ?? []).slice(0, 3) : [];
+}

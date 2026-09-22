@@ -2,11 +2,11 @@ import { isPublicHost } from "./domainValidator";
 
 export type EmailDomainStatus = "ok" | "invalid" | "unknown";
 
-const DOH_ENDPOINTS = [
+export const DOH_ENDPOINTS = [
   "https://cloudflare-dns.com/dns-query",
   "https://dns.google/resolve",
 ];
-const DOH_TIMEOUT_MS = 3000;
+export const DOH_TIMEOUT_MS = 3000;
 const MAX_CACHE = 2000;
 
 const EMAIL_SHAPE = /^[a-z0-9._%+-]{1,64}@([a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63})+)$/i;

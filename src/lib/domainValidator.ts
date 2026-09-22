@@ -5,12 +5,16 @@ export type { DomainStatus } from "./leadRules";
 export interface SiteInspection {
   status: DomainStatus;
   email: string;
-  /** Números de WhatsApp achados em links do site (só dígitos, com DDI), do primeiro para o último. */
+  /** Números de WhatsApp achados em links do site (só dígitos, com DDI), do mais repetido para o menos. */
   whatsapp: string[];
+  /** Telefones que o próprio site mostra (links tel: e texto), do mais repetido para o menos. Ainda não validados. */
+  phones: string[];
 }
 
 const PROBE_TIMEOUT_MS = 5000;
-const MAX_HTML_BYTES = 250_000;
+// Sites de WordPress/Elementor enchem o começo da página de CSS e deixam o contato no rodapé: com 250 KB, o
+// telefone da Padaria Bublitz (posição 261.566) ficava de fora, e o e-mail e o WhatsApp do rodapé também.
+const MAX_HTML_BYTES = 800_000;
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
@@ -49,16 +53,62 @@ const MAILTO_RE = /mailto:([^"'?&\s<>]{3,120})/gi;
 // (wa.me/message/XXXX não traz número e não casa, pois exige dígitos logo após a barra).
 const WA_ME_RE = /wa\.me\/\+?(\d{10,15})/gi;
 const WA_SEND_RE = /whatsapp(?:\.com)?[^"'\s<>]{0,8}send\/?\?[^"'\s<>]*?phone=\+?(\d{10,15})/gi;
+const TEL_LINK_RE = /href\s*=\s*["']tel:([^"']{8,30})["']/gi;
+// Telefone escrito na página: exige separador antes dos 4 últimos dígitos, para não pegar códigos e IDs.
+const PHONE_TEXT_RE = /(?:\+?55[\s.-]*)?\(?\b\d{2}\)?[\s.-]*9?\s?\d{4}[\s.-]\d{4}\b/g;
+// Crédito de quem fez o site ("Desenvolvido por ... [WhatsApp]"): esse número é da agência, não da empresa.
+const CREDIT_RE = /(desenvolvid[oa]|criad[oa]|feito|produzid[oa]|developed|made|powered|site)\s+(por|by|pela|pelo)\b/i;
 
-/** Extrai números de WhatsApp de links (em HTML ou de uma URL). Sem duplicados, na ordem em que aparecem. */
+/** Só dígitos, sem DDI 55 e sem o zero de discagem: variações do mesmo número contam juntas. */
+const phoneDigits = (s: string) => {
+  let d = s.replace(/\D/g, "");
+  if (d.startsWith("55") && d.length >= 12) d = d.slice(2);
+  if (d.startsWith("0") && (d.length === 11 || d.length === 12)) d = d.slice(1);
+  return d;
+};
+
+const cleanSource = (text: string) =>
+  text.slice(0, MAX_HTML_BYTES).replace(/data:[a-z]+\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+/gi, "");
+
+/** Ordena do mais repetido para o menos (empate: o que aparece primeiro). */
+function rankByCount(found: { value: string; index: number }[]): string[] {
+  const counts = new Map<string, { n: number; first: number }>();
+  for (const { value, index } of found) {
+    const c = counts.get(value);
+    if (c) c.n++;
+    else counts.set(value, { n: 1, first: index });
+  }
+  return [...counts.entries()].sort((a, b) => b[1].n - a[1].n || a[1].first - b[1].first).map(([value]) => value);
+}
+
+/**
+ * Extrai números de WhatsApp de links (em HTML ou de uma URL), do mais repetido para o menos.
+ * O número da empresa costuma aparecer várias vezes (topo, botão flutuante, rodapé); o da agência que fez o
+ * site aparece uma vez, perto de "desenvolvido por", e é ignorado. Antes valia o primeiro que aparecesse.
+ */
 export function extractWhatsAppNumbers(text: string): string[] {
   if (!text) return [];
-  const source = text.slice(0, MAX_HTML_BYTES).replace(/data:[a-z]+\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+/gi, "");
-  const found: string[] = [];
+  const source = cleanSource(text);
+  const found: { value: string; index: number }[] = [];
   for (const re of [WA_ME_RE, WA_SEND_RE]) {
-    for (const m of source.matchAll(re)) if (!found.includes(m[1])) found.push(m[1]);
+    for (const m of source.matchAll(re)) {
+      const before = source.slice(Math.max(0, m.index - 200), m.index).replace(/<[^>]*>/g, " ");
+      if (CREDIT_RE.test(before)) continue;
+      found.push({ value: m[1], index: m.index });
+    }
   }
-  return found.slice(0, 5);
+  return rankByCount(found).slice(0, 5);
+}
+
+/** Telefones que a página mostra (links tel: e texto visível), do mais repetido para o menos. Sem validar. */
+export function extractPhoneNumbers(html: string): string[] {
+  if (!html) return [];
+  const source = cleanSource(html);
+  const found: { value: string; index: number }[] = [];
+  for (const m of source.matchAll(TEL_LINK_RE)) found.push({ value: phoneDigits(m[1]), index: m.index });
+  const visible = source.replace(/<(script|style|noscript)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]*>/g, " ");
+  for (const m of visible.matchAll(PHONE_TEXT_RE)) found.push({ value: phoneDigits(m[0]), index: MAX_HTML_BYTES + m.index });
+  return rankByCount(found).slice(0, 8);
 }
 
 export function getHostname(website: string): string | null {
@@ -109,7 +159,7 @@ export function extractEmailFromHtml(html: string, host: string): string {
   return valid.find((e) => e.split("@")[1].endsWith(root)) ?? valid[0];
 }
 
-interface Probe {
+export interface Probe {
   status: number;
   finalUrl: string;
   html: string;
@@ -203,7 +253,7 @@ async function fetchValidated(
 }
 
 /** Faz um GET real (HEAD é recusado por muitos servidores). O timeout cobre também a leitura do corpo. */
-async function probe(url: string): Promise<Probe | null> {
+export async function probe(url: string): Promise<Probe | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
   try {
@@ -230,6 +280,13 @@ async function probe(url: string): Promise<Probe | null> {
   }
 }
 
+/** Página padrão de servidor, domínio à venda ou conta suspensa: o endereço existe, mas não é um site. */
+export function isParkedPage(html: string): boolean {
+  if (html.length >= 30_000) return false;
+  const lower = html.toLowerCase();
+  return PARKED_MARKERS.some((marker) => lower.includes(marker));
+}
+
 // 401/403/405/429 significam que o servidor está no ar (só recusou o "robô"). Só isto indica site quebrado:
 const isBroken = (p: Probe) => p.status === 404 || p.status === 410 || p.status >= 500;
 
@@ -237,13 +294,15 @@ const isBroken = (p: Probe) => p.status === 404 || p.status === 410 || p.status 
  * Descobre a situação real do site em uma única passada (HTTPS e HTTP em paralelo) e já extrai o e-mail
  * do HTML baixado, evitando uma segunda requisição.
  */
+const OFFLINE: SiteInspection = { status: "Erro 404/Inativo", email: "N/D", whatsapp: [], phones: [] };
+
 export async function inspectWebsite(website: string): Promise<SiteInspection> {
   const host = getHostname(website);
-  if (!host) return { status: "Erro 404/Inativo", email: "N/D", whatsapp: [] };
+  if (!host) return OFFLINE;
   // Endereço interno cadastrado no Google: não consultamos (SSRF) e ele não é um site público.
-  if (!isPublicHost(host) && !isSocialHost(host)) return { status: "Erro 404/Inativo", email: "N/D", whatsapp: [] };
+  if (!isPublicHost(host) && !isSocialHost(host)) return OFFLINE;
   // O "site" cadastrado no Google costuma ser justamente o link do WhatsApp (wa.me/55...).
-  if (isSocialHost(host)) return { status: "Só Rede Social", email: "N/D", whatsapp: extractWhatsAppNumbers(website) };
+  if (isSocialHost(host)) return { status: "Só Rede Social", email: "N/D", whatsapp: extractWhatsAppNumbers(website), phones: [] };
 
   const [secure, plain] = await Promise.all([probe(`https://${host}`), probe(`http://${host}`)]);
 
@@ -258,17 +317,19 @@ export async function inspectWebsite(website: string): Promise<SiteInspection> {
     status = plain.finalUrl.startsWith("https://") ? "SSL Válido" : "HTTP Inseguro";
   }
 
-  if (!winner) return { status: "Erro 404/Inativo", email: "N/D", whatsapp: [] };
+  if (!winner) return OFFLINE;
 
   const finalHost = getHostname(winner.finalUrl);
   if (finalHost && isSocialHost(finalHost)) {
-    return { status: "Só Rede Social", email: "N/D", whatsapp: extractWhatsAppNumbers(winner.finalUrl) };
+    return { status: "Só Rede Social", email: "N/D", whatsapp: extractWhatsAppNumbers(winner.finalUrl), phones: [] };
   }
 
-  if (winner.html.length < 30_000) {
-    const lower = winner.html.toLowerCase();
-    if (PARKED_MARKERS.some((marker) => lower.includes(marker))) return { status: "Erro 404/Inativo", email: "N/D", whatsapp: [] };
-  }
+  if (isParkedPage(winner.html)) return OFFLINE;
 
-  return { status, email: extractEmailFromHtml(winner.html, host), whatsapp: extractWhatsAppNumbers(winner.html) };
+  return {
+    status,
+    email: extractEmailFromHtml(winner.html, host),
+    whatsapp: extractWhatsAppNumbers(winner.html),
+    phones: extractPhoneNumbers(winner.html),
+  };
 }
