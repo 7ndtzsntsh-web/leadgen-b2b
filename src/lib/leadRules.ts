@@ -11,6 +11,11 @@ export interface LeadCheck {
   key: "telefone" | "whatsapp" | "email" | "site" | "atividade" | "cidade";
   ok: boolean;
   detail: string;
+  /**
+   * Só informação: não existe forma gratuita de checar (ex.: se um celular tem WhatsApp). Aparece para o usuário,
+   * mas não derruba o selo VERIFICADO — senão nenhum lead de celular seria verificado nunca.
+   */
+  info?: boolean;
 }
 
 export interface Lead {
@@ -32,6 +37,10 @@ export interface Lead {
   whatsapp?: string;
   /** Ano da última atualização do cadastro, só quando ele é antigo (5 anos ou mais): a empresa pode ter fechado. */
   staleSince?: number;
+  /** CNPJ (14 dígitos), quando o lead veio do cadastro da Receita Federal. */
+  cnpj?: string;
+  /** Data de abertura da empresa na Receita (AAAA-MM-DD). */
+  openedOn?: string;
   /** Cidade real do endereço (usada no texto de abordagem; pode diferir da cidade pesquisada). */
   city?: string;
   /** Checagens reais feitas neste lead e se todas foram confirmadas. */
@@ -39,6 +48,17 @@ export interface Lead {
   verified?: boolean;
   isExpansion?: boolean;
   expansionSource?: string;
+}
+
+/** 12345678000190 -> 12.345.678/0001-90 */
+export const formatCnpj = (cnpj: string) =>
+  cnpj.length === 14 ? `${cnpj.slice(0, 2)}.${cnpj.slice(2, 5)}.${cnpj.slice(5, 8)}/${cnpj.slice(8, 12)}-${cnpj.slice(12)}` : cnpj;
+
+/** Aberta há até 2 anos: ainda montando a presença online, a melhor hora para vender site. */
+export function isNewCompany(openedOn: string | undefined, now = new Date()): boolean {
+  if (!openedOn) return false;
+  const opened = Date.parse(openedOn);
+  return !Number.isNaN(opened) && now.getTime() - opened <= 2 * 365.25 * 24 * 3600 * 1000;
 }
 
 /** Empresas que, na prática, não têm um site funcionando: são as melhores oportunidades para vender um site. */
@@ -199,6 +219,8 @@ export interface ScoreInput {
   hasEmail: boolean;
   /** Anos desde a última atualização/conferência do cadastro, quando a fonte informa. */
   ageYears?: number;
+  /** Empresa aberta há até 2 anos (Receita): ainda montando a presença online, a melhor hora para vender site. */
+  newCompany?: boolean;
 }
 
 /**
@@ -209,6 +231,7 @@ export interface ScoreInput {
  *   confirmação vale menos: pode não ter WhatsApp.
  * - Sem nenhuma avaliação costuma ser negócio parado ou recém-aberto.
  * - Cadastro sem atualização há anos: a empresa pode ter fechado ou trocado de número.
+ * - Empresa aberta há até 2 anos (Receita): ainda montando a presença online.
  */
 export function scoreLead(input: ScoreInput): number {
   let score = 0;
@@ -237,6 +260,7 @@ export function scoreLead(input: ScoreInput): number {
     if (input.ageYears >= 5) score -= 20;
     else if (input.ageYears >= 3) score -= 10;
   }
+  if (input.newCompany) score += 10;
 
   return Math.max(0, Math.min(score, 100));
 }

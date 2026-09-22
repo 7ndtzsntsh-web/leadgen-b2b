@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "security:scan": "node scripts/observatory-local.mjs"
+    "security:scan": "node scripts/observatory-local.mjs",
+    "cnpj:baixar": "node scripts/cnpj/download.mjs",
+    "cnpj:gerar": "node scripts/cnpj/build.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

@@ -42,3 +42,6 @@ next-env.d.ts
 
 # mantém o modelo de variáveis versionado
 !.env.example
+
+# Dados brutos da Receita Federal (5+ GB): nunca vão para o git
+.cache/
