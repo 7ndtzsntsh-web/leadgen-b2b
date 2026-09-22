@@ -6,9 +6,13 @@ import type { LeadCheck, SiteStatus } from "./leadRules";
  * - google: Google Maps (a própria empresa mantém);
  * - confirmado: o número do cadastro aparece também no site da empresa;
  * - site: tirado do site da empresa (o cadastro não tinha, ou tinha outro número);
+ * - receita: cadastro oficial de CNPJ (número exclusivo da empresa: os de contador são descartados na importação);
  * - cadastro: só o cadastro do mapa, sem outra fonte para conferir.
  */
-export type PhoneOrigin = "google" | "confirmado" | "site" | "cadastro";
+export type PhoneOrigin = "google" | "confirmado" | "site" | "receita" | "cadastro";
+
+/** Até quantos anos de empresa o telefone da Receita é considerado atual (quem abriu há mais tempo pode ter trocado). */
+const RECEITA_PHONE_FRESH_YEARS = 6;
 export type WhatsAppOrigin = "site" | "cadastro";
 
 export interface VerificationInput {
@@ -33,6 +37,10 @@ export interface VerificationInput {
   siteSearched?: string[];
   /** A fonte informou que a empresa está em funcionamento (status do Google = OPERATIONAL). */
   activeConfirmed: boolean;
+  /** CNPJ com situação ATIVA na Receita Federal. */
+  cnpjActive?: boolean;
+  /** Data de abertura da empresa na Receita (AAAA-MM-DD). */
+  openedOn?: string;
   /** Última atualização do cadastro no mapa (data ISO). */
   lastEdit?: string;
   /** Última vez que um colaborador do mapa conferiu a empresa no local (check_date, data ISO). */
@@ -76,6 +84,12 @@ function phoneCheck(input: VerificationInput): LeadCheck {
       };
     case "google":
       return { key: "telefone", ok: true, detail: `Telefone do Google Maps, com DDD válido${ddd}` };
+    case "receita": {
+      const year = input.openedOn?.slice(0, 4) ?? "";
+      return input.openedOn && yearsSince(input.openedOn, input.now) <= RECEITA_PHONE_FRESH_YEARS
+        ? { key: "telefone", ok: true, detail: `Telefone do cadastro oficial da empresa na Receita Federal (aberta em ${year}; número só dela, não é de contador)` }
+        : { key: "telefone", ok: false, detail: `Telefone do cadastro na Receita Federal, mas a empresa é de ${year}: o número pode ter mudado` };
+    }
     default:
       return { key: "telefone", ok: false, detail: `Formato e DDD válidos${ddd}, mas o número não foi confirmado em outra fonte` };
   }
@@ -83,6 +97,10 @@ function phoneCheck(input: VerificationInput): LeadCheck {
 
 function activityCheck(input: VerificationInput, now: Date): LeadCheck {
   if (input.activeConfirmed) return { key: "atividade", ok: true, detail: "Empresa em funcionamento segundo o Google" };
+  if (input.cnpjActive) {
+    const opened = input.openedOn ? ` (aberta em ${monthYear(input.openedOn)})` : "";
+    return { key: "atividade", ok: true, detail: `CNPJ ativo na Receita Federal${opened}` };
+  }
   if (isOwnSiteLive(input.siteStatus)) {
     return { key: "atividade", ok: true, detail: "Site da empresa no ar agora (sinal de que está funcionando)" };
   }
@@ -129,7 +147,12 @@ export function buildChecks(input: VerificationInput): LeadCheck[] {
         : "WhatsApp confirmado: link no site ou perfil da própria empresa",
     });
   } else if (input.unconfirmedMobile) {
-    checks.push({ key: "whatsapp", ok: false, detail: "Celular, mas sem WhatsApp confirmado: pode não ter" });
+    checks.push({
+      key: "whatsapp",
+      ok: false,
+      info: true,
+      detail: "Celular: não existe forma gratuita de confirmar WhatsApp (use \"Testar WPP\")",
+    });
   }
 
   if (input.email === "ok") {
@@ -155,4 +178,8 @@ export function buildChecks(input: VerificationInput): LeadCheck[] {
   return checks;
 }
 
-export const isVerified = (checks: LeadCheck[]): boolean => checks.length > 0 && checks.every((c) => c.ok);
+/** VERIFICADO = tudo que dá para checar foi confirmado. As checagens só informativas não contam. */
+export const isVerified = (checks: LeadCheck[]): boolean => {
+  const counted = checks.filter((c) => !c.info);
+  return counted.length > 0 && counted.every((c) => c.ok);
+};

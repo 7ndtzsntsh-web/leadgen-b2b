@@ -112,6 +112,39 @@ async function search(name: string, clues: SiteClues): Promise<string | undefine
   return undefined;
 }
 
+// Provedores de e-mail gratuitos: o domínio não é da empresa.
+const FREE_MAIL = new Set([
+  "gmail.com", "googlemail.com", "hotmail.com", "hotmail.com.br", "outlook.com", "outlook.com.br", "live.com", "msn.com",
+  "yahoo.com", "yahoo.com.br", "icloud.com", "me.com", "bol.com.br", "uol.com.br", "terra.com.br", "ig.com.br",
+  "globo.com", "globomail.com", "r7.com", "oi.com.br", "zipmail.com.br", "protonmail.com", "proton.me", "aol.com",
+]);
+
+/**
+ * Site pelo domínio do e-mail da empresa (contato@padariaxyz.com.br -> padariaxyz.com.br). O domínio já é da
+ * empresa, então basta a página mostrar o nome dela ou o telefone.
+ */
+export async function siteFromEmail(email: string, name: string, clues: SiteClues): Promise<string | undefined> {
+  const domain = email.split("@")[1]?.toLowerCase().replace(/\.$/, "");
+  if (!domain || FREE_MAIL.has(domain) || !isPublicHost(domain)) return undefined;
+  const { distinctive } = candidateDomains(name, clues.country);
+  for (const host of [domain, `www.${domain}`]) {
+    if (!(await resolves(host))) continue;
+    const page = (await probe(`https://${host}`)) ?? (await probe(`http://${host}`));
+    if (!page || page.status >= 400 || !page.html) continue;
+    const finalHost = getHostname(page.finalUrl);
+    if (!finalHost || isSocialHost(finalHost) || isParkedPage(page.html)) continue;
+    const text = ` ${normalizeText(page.html.replace(/<[^>]*>/g, " ")).replace(/[^a-z0-9]+/g, " ")} `;
+    const nameHit = distinctive.length > 0 && distinctive.every((w) => text.includes(` ${w} `));
+    const digits = page.html.replace(/\D/g, "");
+    const phoneHit = clues.phones.some((p) => {
+      const tail = p.replace(/\D/g, "").slice(-8);
+      return tail.length === 8 && digits.includes(tail);
+    });
+    if (nameHit || phoneHit) return page.finalUrl.startsWith("https://") ? `https://${host}` : `http://${host}`;
+  }
+  return undefined;
+}
+
 /** Site próprio da empresa, ou undefined se não houver um que dê para confirmar. */
 export function findOwnWebsite(name: string, clues: SiteClues): Promise<string | undefined> {
   const key = `${normalizeText(name)}|${normalizeText(clues.city ?? "")}|${clues.country}`;

@@ -10,7 +10,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { NO_PHONE, callOf, compareLeads, getPhoneType, internationalNumber, matchesSiteFilters, sameNumber, whatsappOf, type Lead } from "@/lib/leadRules";
+import {
+  NO_PHONE, callOf, compareLeads, formatCnpj, getPhoneType, internationalNumber, isNewCompany, matchesSiteFilters, sameNumber, whatsappOf,
+  type Lead,
+} from "@/lib/leadRules";
 import { semanticDictionary, uiTranslations } from "@/lib/semanticDictionary";
 import { buildPitch, pitchLangFor } from "@/lib/pitches";
 
@@ -116,6 +119,25 @@ function PhoneKind({ phone }: { phone: string }) {
   return null;
 }
 
+/** CNPJ e ano de abertura (quando o lead veio da Receita Federal) e o selo de empresa recém-aberta. */
+function CompanyInfo({ lead }: { lead: Lead }) {
+  if (!lead.cnpj) return null;
+  return (
+    <div className="text-[10px] font-mono text-muted-foreground mt-1 flex flex-wrap items-center gap-2">
+      <span>CNPJ {formatCnpj(lead.cnpj)}{lead.openedOn ? ` · aberta em ${lead.openedOn.slice(0, 4)}` : ""}</span>
+      {isNewCompany(lead.openedOn) && (
+        <Badge
+          variant="outline"
+          title="Aberta há até 2 anos: a melhor hora para vender site"
+          className="bg-green-500/10 text-green-400 border-green-500/30 text-[9px] px-1 uppercase whitespace-nowrap"
+        >
+          Empresa nova
+        </Badge>
+      )}
+    </div>
+  );
+}
+
 /** Cadastro sem atualização há 5 anos ou mais: a empresa pode ter fechado ou trocado de número. */
 function StaleBadge({ lead }: { lead: Lead }) {
   if (!lead.staleSince) return null;
@@ -138,7 +160,9 @@ function StaleBadge({ lead }: { lead: Lead }) {
 function VerificationDetails({ lead }: { lead: Lead }) {
   const checks = lead.checks ?? [];
   if (checks.length === 0) return null;
-  const confirmed = checks.filter((c) => c.ok).length;
+  // As checagens só informativas (ex.: WhatsApp, que não dá para confirmar de graça) não entram na conta.
+  const counted = checks.filter((c) => !c.info);
+  const confirmed = counted.filter((c) => c.ok).length;
   return (
     <details className="text-[11px]">
       <summary
@@ -151,15 +175,15 @@ function VerificationDetails({ lead }: { lead: Lead }) {
           </Badge>
         ) : (
           <Badge variant="outline" className="bg-yellow-500/10 text-yellow-400 border-yellow-500/30 text-[9px] px-1 uppercase whitespace-nowrap">
-            ⚠ PARCIAL {confirmed}/{checks.length}
+            ⚠ PARCIAL {confirmed}/{counted.length}
           </Badge>
         )}
         <span className="text-muted-foreground underline decoration-dotted">o que foi checado</span>
       </summary>
       <ul className="mt-2 space-y-1 leading-snug">
         {checks.map((c) => (
-          <li key={c.key} className={c.ok ? "text-green-400" : "text-yellow-400"}>
-            {c.ok ? "✔" : "⚠"} {c.detail}
+          <li key={c.key} className={c.ok ? "text-green-400" : c.info ? "text-gray-400" : "text-yellow-400"}>
+            {c.ok ? "✔" : c.info ? "ℹ" : "⚠"} {c.detail}
           </li>
         ))}
       </ul>
@@ -175,6 +199,7 @@ const LeadCard = memo(function LeadCard({ lead, copied, onCopy, onWhatsApp, onCa
       <div>
         <div className="font-medium text-white text-lg flex items-center gap-2">{lead.name}</div>
         <div className="text-xs text-muted-foreground mt-1">{lead.category}</div>
+        <CompanyInfo lead={lead} />
         {lead.staleSince && <div className="mt-1"><StaleBadge lead={lead} /></div>}
         <div className="mt-2"><VerificationDetails lead={lead} /></div>
         {lead.isExpansion && <div className="text-[10px] text-indigo-400 mt-1">🚀 EXPANSÃO: {lead.expansionSource}</div>}
@@ -236,6 +261,7 @@ const LeadRow = memo(function LeadRow({ lead, copied, onCopy, onWhatsApp, onCall
           <StaleBadge lead={lead} />
         </div>
         <div className="text-[10px] uppercase font-mono tracking-wider text-muted-foreground mt-1 mb-1">{lead.category}</div>
+        <CompanyInfo lead={lead} />
         <div className="mt-1"><VerificationDetails lead={lead} /></div>
 
         <div className="flex flex-col gap-1 mt-2">
@@ -538,7 +564,7 @@ export default function Home() {
       "Nome", "Segmento", "Origem (Expansão)", "DDD", "Telefone (Fixo/WPP)", "Tipo Tel", "WhatsApp",
       "E-mail do site (domínio recebe e-mails)", "Endereço Completo", "Cidade (do endereço)", "Status do Site", "URL",
       "Avaliação Google", "Score", "Verificação", "Checagens", "WhatsApp confirmado", "Outros telefones",
-      "Cadastro sem atualização desde",
+      "Cadastro sem atualização desde", "CNPJ", "Aberta em",
     ];
 
     const rows = leads.map((l) => {
@@ -554,8 +580,9 @@ export default function Home() {
         l.name, l.category, l.isExpansion ? (l.expansionSource || "Expansão") : "Busca Primária", ddd, phoneStr,
         l.phoneType || "UNKNOWN", whatsappOf(l) ?? "", l.email, l.address, l.city ?? "", l.siteStatus, l.website || "",
         l.rating > 0 ? l.rating : "", l.score, l.verified ? "VERIFICADO" : "PARCIAL",
-        (l.checks ?? []).map((c) => `${c.ok ? "OK" : "PENDENTE"}: ${c.detail}`).join(" | "),
+        (l.checks ?? []).map((c) => `${c.ok ? "OK" : c.info ? "INFO" : "PENDENTE"}: ${c.detail}`).join(" | "),
         l.whatsapp ? "Sim" : "Não", (l.otherPhones ?? []).join(" / "), l.staleSince ?? "",
+        l.cnpj ? formatCnpj(l.cnpj) : "", l.openedOn ?? "",
       ].map(csvCell).join(";");
     });
 

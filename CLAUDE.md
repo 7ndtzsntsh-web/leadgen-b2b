@@ -50,6 +50,25 @@ node_modules/.bin/jiti arquivo.ts                   # teste de lógica (não há
   num teste, 78 de 96 nomes batiam com domínio de OUTRA empresa.
 - Cadastro sem atualização há 8+ anos e sem site no ar: descartado. Há 5+ anos: aparece com "Dados de AAAA".
 - Toda frase de checagem tem que ser verdadeira: "confirmado" só quando houve confirmação de verdade.
+- Checagem `info: true` (ex.: WhatsApp de celular, que não dá para confirmar de graça) aparece em cinza e não
+  derruba o selo VERIFICADO. Não usar `info` para esconder o que DÁ para checar.
+
+## Cadastro de CNPJ da Receita Federal (fonte principal em SC)
+
+- Dados abertos da Receita, processados em `public/cnpj/<uf>/<cidade>.json` (hoje só SC; `CNPJ_UFS` em
+  `src/lib/cnpjSource.ts`). Na busca, vêm ANTES do mapa; o mesmo negócio no mapa é repetição e fica de fora.
+- Entram só: CNPJ ATIVO, dos nichos de `src/lib/data/nicheCnaes.json` (códigos conferidos na tabela oficial),
+  com nome fantasia, com telefone/e-mail próprio. Telefone ou e-mail usado por 3+ empresas = contador: sai.
+  Sócios não são baixados.
+- Atualizar todo mês (a Receita publica mensalmente; ~5,4 GB, uns 25 min + 2 min de processamento):
+  ```bash
+  npm run cnpj:baixar             # baixa o mês mais recente para .cache/ (fora do git)
+  npm run cnpj:gerar -- AAAA-MM SC
+  ```
+  Depois: conferir o resumo (empresas, cidades, tamanho), testar uma busca e publicar por PR.
+- Telefone da Receita conta como confirmado se a empresa tem até 6 anos; mais antiga aparece com aviso.
+  "CNPJ ativo" confirma que a empresa existe no papel (pode estar parada: por isso o texto diz "CNPJ ativo").
+- Nicho novo: acrescentar em `nicheCnaes.json` conferindo o código na tabela `Cnaes.zip` e rodar o gerar.
 - Celular: alvos de toque com 44px (`h-11 md:h-8`); campos com letra de 16px (o iPhone não dá zoom).
 - PRs do Dependabot com salto grande de versão: decisão do dono.
 

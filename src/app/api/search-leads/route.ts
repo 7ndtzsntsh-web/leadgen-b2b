@@ -11,11 +11,12 @@ import { acquireSlot, guardApi } from '@/lib/apiGuard';
 import { normalizeText } from '@/lib/text';
 import { areaKey, checkAddress, type AddressCheck, type SearchedArea, type StructuredAddress } from '@/lib/address';
 import { checkEmailDomain } from '@/lib/emailCheck';
-import { candidateDomains, findOwnWebsite } from '@/lib/siteFinder';
+import { candidateDomains, findOwnWebsite, siteFromEmail } from '@/lib/siteFinder';
+import { CNPJ_UFS, companiesFor, loadCity, nicheFilter, type NicheFilter } from '@/lib/cnpjSource';
 import { UF_NAMES } from '@/lib/ufData';
 import { buildChecks, isOwnSiteLive, isVerified, yearsSince, type PhoneOrigin, type WhatsAppOrigin } from '@/lib/verification';
 import {
-  NO_PHONE, cleanPhone, cleanPhones, getPhoneType, matchesSiteFilters, pickWhatsApp, sameNumber, scoreLead, splitPhones,
+  NO_PHONE, cleanPhone, cleanPhones, getPhoneType, isNewCompany, matchesSiteFilters, pickWhatsApp, sameNumber, scoreLead, splitPhones,
   type SiteStatus,
 } from '@/lib/leadRules';
 
@@ -85,7 +86,13 @@ interface NominatimPlace {
 
 interface RawLead {
   id: string;
-  source: 'google' | 'osm';
+  /** cnpj = cadastro da Receita Federal (dados abertos). */
+  source: 'google' | 'osm' | 'cnpj';
+  /** E-mail do cadastro da Receita (os de contador já saem na importação). */
+  email?: string;
+  cnpj?: string;
+  /** Data de abertura na Receita (AAAA-MM-DD). */
+  openedOn?: string;
   name: string;
   category: string;
   /** Telefone principal (o celular, quando há: é o canal da abordagem). */
@@ -128,6 +135,10 @@ interface MiningContext {
   googleWorked: boolean;
   /** Cidades e estados que esta busca cobre, para conferir o endereço de cada lead. */
   area: SearchedArea;
+  /** Endereço do próprio site, para ler os arquivos do cadastro da Receita (public/cnpj). */
+  origin: string;
+  /** Nomes já vindos da Receita: o mesmo lugar no mapa é repetido e fica de fora. */
+  knownNames: Set<string>;
   isDone: () => boolean;
   send: (data: unknown) => void;
 }
@@ -145,6 +156,9 @@ function acceptPlace(ctx: MiningContext, queue: AsyncQueue<RawLead>, loc: Search
   if (closed || raw.name === 'Desconhecido') return true; // fechado, ou cadastro sem nome (não dá para abordar)
 
   const nameKey = normalizeText(raw.name).split(/\s[-–|]\s/)[0].replace(/[^a-z0-9]/g, '');
+  // A Receita vem primeiro e é a fonte mais completa: o mesmo negócio achado depois no mapa é repetição.
+  if (raw.source === 'cnpj') ctx.knownNames.add(nameKey);
+  else if (ctx.knownNames.has(nameKey)) return true;
   const occurrences = (ctx.nameCounts.get(nameKey) ?? 0) + 1;
   ctx.nameCounts.set(nameKey, occurrences);
   if (nameKey.length > 3 && occurrences > 2) return true;
@@ -175,7 +189,7 @@ function buildSearchedArea(locations: SearchLocation[]): SearchedArea {
 /** Verifica o site, aplica os filtros, pontua e envia o lead. */
 async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
   if (ctx.isDone()) return;
-  if (!raw.website && raw.phone === NO_PHONE && !raw.whatsapp) return; // sem nenhum canal de contato
+  if (!raw.website && raw.phone === NO_PHONE && !raw.whatsapp && !raw.email) return; // sem nenhum canal de contato
 
   // Confere o endereço ANTES de gastar tempo no site: resultado de outro estado é descartado, e a cidade real
   // do endereço é a que vai no texto de abordagem (não a cidade pesquisada).
@@ -191,9 +205,11 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
   let website = raw.website;
   let siteFound: string | undefined;
   let siteSearched: string[] | undefined;
-  if (!website && raw.source === 'osm') {
+  if (!website && raw.source !== 'google') {
     const city = addressCheck && 'city' in addressCheck && addressCheck.city ? addressCheck.city : raw.expansionSource;
-    siteFound = await findOwnWebsite(raw.name, { phones: listedPhones, city, country: ctx.country });
+    const clues = { phones: listedPhones, city, country: ctx.country };
+    // Primeiro o domínio do e-mail da empresa (contato@padariaxyz.com.br), depois o nome.
+    siteFound = (raw.email ? await siteFromEmail(raw.email, raw.name, clues) : undefined) ?? (await findOwnWebsite(raw.name, clues));
     website = siteFound;
     if (!siteFound) siteSearched = candidateDomains(raw.name, ctx.country).hosts;
   }
@@ -206,19 +222,20 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
     siteStatus = inspection.status;
     email = inspection.email;
   }
+  if (email === 'N/D' && raw.email) email = raw.email; // o e-mail do site tem preferência sobre o da Receita
   const siteLive = isOwnSiteLive(siteStatus);
 
   // Telefone: o site da própria empresa é a fonte mais atual. Número do cadastro que aparece no site = confirmado;
   // se o site mostra OUTRO número, vale o do site (era de onde vinham os "números errados").
   let phone = raw.phone;
   let otherPhones = raw.otherPhones ?? [];
-  let phoneOrigin: PhoneOrigin = raw.source === 'google' ? 'google' : 'cadastro';
+  let phoneOrigin: PhoneOrigin = raw.source === 'google' ? 'google' : raw.source === 'cnpj' ? 'receita' : 'cadastro';
   let phoneReplaced = false;
   const sitePhones = siteLive && inspection ? cleanPhones(inspection.phones, ctx.country, raw.uf) : [];
   if (sitePhones.length > 0) {
     if (listedPhones.some((p) => sitePhones.some((s) => sameNumber(s, p)))) {
       phoneOrigin = 'confirmado';
-    } else if (raw.source === 'osm') {
+    } else if (raw.source !== 'google') {
       phone = sitePhones.find((s) => getPhoneType(s, ctx.country) === 'MOBILE') ?? sitePhones[0];
       otherPhones = sitePhones.filter((s) => !sameNumber(s, phone)).slice(0, 2);
       phoneOrigin = 'site';
@@ -267,6 +284,8 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
     siteFound,
     siteSearched,
     activeConfirmed: raw.activeConfirmed,
+    cnpjActive: raw.source === 'cnpj',
+    openedOn: raw.openedOn,
     lastEdit: raw.lastEdit,
     checkedOn: raw.checkedOn,
     address: addressCheck,
@@ -282,6 +301,7 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
     hasPhone: phone !== NO_PHONE || !!whatsapp,
     hasEmail: email !== 'N/D',
     ageYears,
+    newCompany: isNewCompany(raw.openedOn),
   });
 
   ctx.streamed++;
@@ -304,6 +324,8 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
       phoneType,
       whatsapp,
       staleSince: ageYears !== undefined && ageYears >= STALE_WARN_YEARS && lastSeen ? Number(lastSeen.slice(0, 4)) : undefined,
+      cnpj: raw.cnpj,
+      openedOn: raw.openedOn,
       city: addressCheck && 'city' in addressCheck ? addressCheck.city : undefined,
       checks,
       verified: isVerified(checks),
@@ -546,6 +568,50 @@ async function collectFromNominatim(
 }
 
 // ---------------------------------------------------------------------------
+// Coleta: cadastro de CNPJ da Receita Federal (dados abertos, processados por scripts/cnpj/build.mjs)
+// ---------------------------------------------------------------------------
+
+/**
+ * Empresas ATIVAS do nicho na cidade, direto do cadastro oficial. Vem antes do mapa: tem muito mais empresas
+ * com telefone e confirma que o CNPJ está ativo. Primeiro as que têm celular e as abertas mais recentemente
+ * (as que mais provavelmente ainda não têm site).
+ */
+async function collectFromCnpj(ctx: MiningContext, queue: AsyncQueue<RawLead>, loc: SearchLocation, term: string, filter: NicheFilter): Promise<void> {
+  if (ctx.country !== 'br' || !loc.uf || !CNPJ_UFS.has(loc.uf) || loc.scope === 'region') return;
+  const all = await loadCity(ctx.origin, loc.uf, loc.city);
+  if (!all) return;
+
+  const found = companiesFor(all, filter).map((c) => ({ c, phones: cleanPhones(c.phones, ctx.country, loc.uf) }));
+  const hasMobile = (phones: string[]) => phones.some((p) => getPhoneType(p, ctx.country) === 'MOBILE');
+  found.sort((a, b) => Number(hasMobile(b.phones)) - Number(hasMobile(a.phones)) || b.c.openedOn.localeCompare(a.c.openedOn));
+
+  for (const { c, phones } of found) {
+    if (ctx.isDone()) return;
+    const phone = phones.find((p) => getPhoneType(p, ctx.country) === 'MOBILE') ?? phones[0] ?? NO_PHONE;
+    const cep = c.cep.length === 8 ? `${c.cep.slice(0, 5)}-${c.cep.slice(5)}` : c.cep;
+    acceptPlace(ctx, queue, loc, {
+      id: `cnpj/${c.cnpj}`,
+      source: 'cnpj',
+      name: c.name,
+      category: term,
+      phone,
+      otherPhones: phones.filter((p) => p !== phone),
+      email: c.email || undefined,
+      cnpj: c.cnpj,
+      openedOn: c.openedOn,
+      address: [c.street, c.district].filter(Boolean).join(' - ') + `, ${loc.city} - ${loc.uf}, ${cep}`,
+      place: { cities: [loc.city], uf: loc.uf },
+      rating: 0,
+      reviewsCount: 0,
+      reviewsKnown: false,
+      activeConfirmed: false,
+      isExpansion: loc.isExpansion,
+      expansionSource: loc.city,
+    }, false);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
 
@@ -585,6 +651,7 @@ export async function GET(req: NextRequest) {
 
   const terms = expandSearchTerm(term, country);
   const typeTerms = placeTypeTerms(term).filter((t) => !terms.includes(t.toLowerCase()));
+  const cnpjFilter = nicheFilter(term);
   const locations = resolveLocations(rawCity, country);
 
   const encoder = new TextEncoder();
@@ -603,6 +670,7 @@ export async function GET(req: NextRequest) {
         volume, country, onlyNoSite, onlyInsecure,
         seenIds: new Set(), seenPhones: new Set(), nameCounts: new Map(),
         streamed: 0, fatal: null, googleWorked: false, area: buildSearchedArea(locations),
+        origin: req.nextUrl.origin, knownNames: new Set(),
         // Quando o usuário fecha a página/toca em "parar", a mineração para e não gasta mais chamadas à API.
         isDone: () => cancelled || ctx.streamed >= volume || Date.now() > deadline,
         send: (data) => write(`data: ${JSON.stringify(data)}\n\n`),
@@ -632,6 +700,7 @@ export async function GET(req: NextRequest) {
           });
 
           try {
+            await collectFromCnpj(ctx, queue, loc, terms[0], cnpjFilter);
             if (GOOGLE_API_KEY) await collectFromGoogle(ctx, queue, loc, terms);
             else await collectFromNominatim(ctx, queue, loc, terms, typeTerms);
           } finally {

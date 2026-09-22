@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
+Disallow: /cnpj/
 
 Sitemap: https://leadgen-b2b.vercel.app/sitemap.xml
