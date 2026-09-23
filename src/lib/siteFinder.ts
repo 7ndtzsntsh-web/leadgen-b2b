@@ -138,6 +138,9 @@ const FREE_MAIL = new Set([
   "gmail.com", "googlemail.com", "hotmail.com", "hotmail.com.br", "outlook.com", "outlook.com.br", "live.com", "msn.com",
   "yahoo.com", "yahoo.com.br", "icloud.com", "me.com", "bol.com.br", "uol.com.br", "terra.com.br", "ig.com.br",
   "globo.com", "globomail.com", "r7.com", "oi.com.br", "zipmail.com.br", "protonmail.com", "proton.me", "aol.com",
+  // EUA: provedores de internet e de e-mail comuns em cadastro de empresa pequena.
+  "comcast.net", "att.net", "sbcglobal.net", "verizon.net", "bellsouth.net", "cox.net", "charter.net", "earthlink.net",
+  "mac.com", "ymail.com", "rocketmail.com", "gmx.com", "mail.com", "optonline.net", "frontier.com", "windstream.net",
 ]);
 
 /**

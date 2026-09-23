@@ -1,5 +1,6 @@
 import { findCity, neighborCities, type City } from "./brCities";
 import { UF_NAMES } from "./ufData";
+import { findUsCity, usNeighborCities } from "./usCities";
 import { normalizeText } from "./text";
 
 export interface SearchLocation {
@@ -90,19 +91,24 @@ export function resolveLocations(rawCity: string, country: string): SearchLocati
   }
 
   const record = country === "br" ? findCity(name, typedUf) : undefined;
-  const uf = record?.uf ?? typedUf;
-  const primary = locationFor(record?.name ?? name, country, false, record, uf);
+  // EUA: a cidade e o estado vêm da lista do Overture ("Miami" sem estado = a Miami com mais empresas, na Flórida).
+  const usRecord = country === "us" ? findUsCity(name, typedUf) : undefined;
+  const uf = record?.uf ?? usRecord?.state ?? typedUf;
+  const primary = locationFor(record?.name ?? usRecord?.name ?? name, country, false, record, uf);
   const queue: SearchLocation[] = [primary];
 
   const curatedKey = expansionKeys.get(normalizeText(name));
   if (curatedKey) {
     for (const neighbor of expansionMap[curatedKey]) {
       const neighborRecord = country === "br" ? (findCity(neighbor, uf) ?? findCity(neighbor)) : undefined;
-      queue.push(locationFor(neighbor, country, true, neighborRecord));
+      const usNeighbor = country === "us" ? (findUsCity(neighbor, uf) ?? findUsCity(neighbor)) : undefined;
+      queue.push(locationFor(neighbor, country, true, neighborRecord, usNeighbor?.state));
     }
   } else if (record) {
     for (const neighbor of neighborCities(record)) queue.push(locationFor(neighbor.name, country, true, neighbor));
-  } else if (uf && UF_NAMES[uf]) {
+  } else if (usRecord) {
+    for (const neighbor of usNeighborCities(usRecord)) queue.push(locationFor(neighbor.name, country, true, undefined, neighbor.state));
+  } else if (country === "br" && uf && UF_NAMES[uf]) {
     // Cidade fora da base do IBGE: última alternativa é o estado inteiro.
     queue.push({ city: UF_NAMES[uf], uf, isExpansion: true, queries: [`${UF_NAMES[uf]}, Brasil`], scope: "region" });
   }

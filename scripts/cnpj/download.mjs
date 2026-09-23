@@ -63,4 +63,4 @@ for (const name of FILES) {
     }
   }
 }
-console.log(`Pronto. Agora: node scripts/cnpj/build.mjs ${month} SC`);
+console.log(`Pronto. Agora: npm run cnpj:mapa && npm run cnpj:gerar -- ${month}`);

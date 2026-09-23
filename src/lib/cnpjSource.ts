@@ -1,18 +1,18 @@
+import cnpjIndex from "../../public/cnpj/index.json";
+import { runPool } from "./async";
 import nicheCnaes from "./data/nicheCnaes.json";
+import { loadIndex, loadRows } from "./regionFiles";
 import { findDictionaryKey } from "./semanticDictionary";
 import { normalizeText } from "./text";
 
 /**
  * Empresas do cadastro de CNPJ da Receita Federal (dados abertos), já filtradas por scripts/cnpj/build.mjs:
  * só ATIVAS, dos nichos do gerador, com nome fantasia e com telefone/e-mail que não é de contador.
- * Ficam em public/cnpj/<uf>/<cidade>.json. Estados sem esses arquivos continuam só com o mapa.
+ * Ficam em public/cnpj (formato em scripts/cnpj/output.mjs). Estados sem esses arquivos continuam só com o mapa.
  */
-export const CNPJ_UFS = new Set(["SC"]);
+export const CNPJ_UFS = new Set(Object.keys(cnpjIndex.ufs));
 
-// Reserva: se o próprio site recusar a leitura (proteção anti-robô), lê do repositório público no GitHub.
-const RAW_BASE = "https://raw.githubusercontent.com/7ndtzsntsh-web/leadgen-b2b/main/public";
-const FETCH_TIMEOUT_MS = 10_000;
-const MAX_CACHED_CITIES = 30;
+const FILE_CONCURRENCY = 4;
 
 export interface CnpjCompany {
   cnpj: string;
@@ -54,59 +54,50 @@ export function nicheFilter(term: string): NicheFilter {
   return { cnaes: new Set(rule.cnaes), nameParts: rule.nome };
 }
 
-export const citySlug = (city: string) => normalizeText(city).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const citySlug = (city: string) => normalizeText(city).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-async function fetchJson(url: string): Promise<unknown | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: controller.signal, headers: { Accept: "application/json" } });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
+type Row = [string, string, string, string, string, string, string, string[], string, string?];
+
+const toCompany = ([cnpj, name, cnae, inicio, street, district, cep, phones, email, site]: Row): CnpjCompany => ({
+  cnpj,
+  name,
+  cnae,
+  openedOn: `${inicio.slice(0, 4)}-${inicio.slice(4, 6)}-${inicio.slice(6, 8)}`,
+  street,
+  district,
+  cep,
+  phones,
+  email,
+  site: site ?? "",
+});
+
+const loadUfIndex = (origin: string, uf: string) => loadIndex(origin, `/cnpj/${uf.toLowerCase()}/index.json`);
+const loadFile = (origin: string, path: string) => loadRows(origin, path, toCompany);
+
+/** Empresas do nicho na cidade (null se a cidade não tem cadastro ou o arquivo não pôde ser lido). */
+export async function loadCompanies(origin: string, uf: string, city: string, filter: NicheFilter): Promise<CnpjCompany[] | null> {
+  const slug = citySlug(city);
+  const entry = (await loadUfIndex(origin, uf))?.cidades[slug];
+  if (entry === undefined) return null;
+  const base = `/cnpj/${uf.toLowerCase()}/${slug}`;
+  if (typeof entry === "number") {
+    const all = await loadFile(origin, `${base}.json`);
+    return all && companiesFor(all, filter);
   }
+
+  // Cidade dividida por ramo: só os arquivos dos ramos do nicho (nicho fora da tabela filtra pelo nome em todos).
+  const cnaes = Object.keys(entry).filter((cnae) => !filter.cnaes || filter.cnaes.has(cnae));
+  const found: CnpjCompany[] = [];
+  let failed = false;
+  await runPool(cnaes, FILE_CONCURRENCY, async (cnae) => {
+    const companies = await loadFile(origin, `${base}/${cnae}.json`);
+    if (!companies) failed = true;
+    else for (const c of companiesFor(companies, filter)) found.push(c);
+  });
+  return failed && found.length === 0 ? null : found;
 }
 
-interface CityFile {
-  linhas: [string, string, string, string, string, string, string, string[], string, string?][];
-}
-
-const cache = new Map<string, Promise<CnpjCompany[] | null>>();
-
-/** Empresas da cidade (null se o estado/cidade não tem arquivo). */
-export function loadCity(origin: string, uf: string, city: string): Promise<CnpjCompany[] | null> {
-  const path = `/cnpj/${uf.toLowerCase()}/${citySlug(city)}.json`;
-  const cached = cache.get(path);
-  if (cached) return cached;
-
-  const pending = (async () => {
-    const data = ((await fetchJson(`${origin}${path}`)) ?? (await fetchJson(`${RAW_BASE}${path}`))) as CityFile | null;
-    if (!data?.linhas) return null;
-    return data.linhas.map(([cnpj, name, cnae, inicio, street, district, cep, phones, email, site]) => ({
-      cnpj,
-      name,
-      cnae,
-      openedOn: `${inicio.slice(0, 4)}-${inicio.slice(4, 6)}-${inicio.slice(6, 8)}`,
-      street,
-      district,
-      cep,
-      phones,
-      email,
-      site: site ?? "",
-    }));
-  })();
-
-  if (cache.size >= MAX_CACHED_CITIES) cache.delete(cache.keys().next().value as string);
-  cache.set(path, pending);
-  pending.then((r) => { if (!r) cache.delete(path); }); // falha temporária: tenta de novo na próxima busca
-  return pending;
-}
-
-/** Empresas do nicho pesquisado. */
-export function companiesFor(all: CnpjCompany[], filter: NicheFilter): CnpjCompany[] {
+function companiesFor(all: CnpjCompany[], filter: NicheFilter): CnpjCompany[] {
   return all.filter((c) => {
     if (filter.cnaes && !filter.cnaes.has(c.cnae)) return false;
     if (!filter.nameParts) return true;

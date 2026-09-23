@@ -7,12 +7,17 @@ import type { LeadCheck, SiteStatus } from "./leadRules";
  * - confirmado: o número do cadastro aparece também no site da empresa;
  * - site: tirado do site da empresa (o cadastro não tinha, ou tinha outro número);
  * - receita: cadastro oficial de CNPJ (número exclusivo da empresa: os de contador são descartados na importação);
+ * - overture: ficha da empresa no Overture Maps (EUA; base aberta com dados de Meta, Microsoft e outras);
  * - cadastro: só o cadastro do mapa, sem outra fonte para conferir.
  */
-export type PhoneOrigin = "google" | "confirmado" | "site" | "receita" | "cadastro";
+export type PhoneOrigin = "google" | "confirmado" | "site" | "receita" | "overture" | "cadastro";
+
+/** Overture: ficha atualizada há até tantos anos conta como telefone atual; confiança (0-100) a partir da qual o lugar "existe". */
+export const OVERTURE_FRESH_YEARS = 2;
+export const OVERTURE_SURE = 80;
 
 /** Até quantos anos de empresa o telefone da Receita é considerado atual (quem abriu há mais tempo pode ter trocado). */
-const RECEITA_PHONE_FRESH_YEARS = 6;
+export const RECEITA_PHONE_FRESH_YEARS = 6;
 export type WhatsAppOrigin = "site" | "cadastro";
 
 export interface VerificationInput {
@@ -43,6 +48,9 @@ export interface VerificationInput {
   cnpjActive?: boolean;
   /** Data de abertura da empresa na Receita (AAAA-MM-DD). */
   openedOn?: string;
+  /** Overture Maps: confiança de que o lugar existe (0 a 100) e mês da última atualização da ficha (AAAA-MM). */
+  overtureConfidence?: number;
+  listingUpdated?: string;
   /** Última atualização do cadastro no mapa (data ISO). */
   lastEdit?: string;
   /** Última vez que um colaborador do mapa conferiu a empresa no local (check_date, data ISO). */
@@ -92,6 +100,14 @@ function phoneCheck(input: VerificationInput): LeadCheck {
         ? { key: "telefone", ok: true, detail: `Telefone do cadastro oficial da empresa na Receita Federal (aberta em ${year}; número só dela, não é de contador)` }
         : { key: "telefone", ok: false, detail: `Telefone do cadastro na Receita Federal, mas a empresa é de ${year}: o número pode ter mudado` };
     }
+    case "overture": {
+      const when = input.listingUpdated ? monthYear(input.listingUpdated) : "";
+      return input.listingUpdated && yearsSince(input.listingUpdated, input.now) <= OVERTURE_FRESH_YEARS
+        ? { key: "telefone", ok: true, detail: `Telefone da ficha da empresa no Overture Maps (dados de Meta, Microsoft e outras), atualizada em ${when}` }
+        : { key: "telefone", ok: false, detail: when
+          ? `Telefone da ficha no Overture Maps, mas ela é de ${input.listingUpdated?.slice(0, 4)}: o número pode ter mudado`
+          : "Telefone da ficha no Overture Maps, sem data de atualização: o número pode ter mudado" };
+    }
     default:
       return { key: "telefone", ok: false, detail: `Formato e DDD válidos${ddd}, mas o número não foi confirmado em outra fonte` };
   }
@@ -105,6 +121,11 @@ function activityCheck(input: VerificationInput, now: Date): LeadCheck {
   }
   if (isOwnSiteLive(input.siteStatus)) {
     return { key: "atividade", ok: true, detail: "Site da empresa no ar agora (sinal de que está funcionando)" };
+  }
+  if (input.overtureConfidence !== undefined) {
+    return input.overtureConfidence >= OVERTURE_SURE
+      ? { key: "atividade", ok: true, detail: `Aberta segundo o Overture Maps (${input.overtureConfidence}% de confiança de que existe)` }
+      : { key: "atividade", ok: false, detail: `Overture Maps marca como aberta, mas só com ${input.overtureConfidence}% de confiança de que existe` };
   }
   if (input.checkedOn && yearsSince(input.checkedOn, now) <= 2) {
     return { key: "atividade", ok: true, detail: `Conferida no local por um colaborador do mapa em ${monthYear(input.checkedOn)}` };

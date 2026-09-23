@@ -9,8 +9,9 @@
     "lint": "eslint",
     "security:scan": "node scripts/observatory-local.mjs",
     "cnpj:baixar": "node scripts/cnpj/download.mjs",
-    "cnpj:gerar": "node scripts/cnpj/build.mjs",
-    "cnpj:mapa": "node scripts/cnpj/osm.mjs"
+    "cnpj:gerar": "node --max-old-space-size=6144 scripts/cnpj/build.mjs",
+    "cnpj:mapa": "node scripts/cnpj/osm.mjs",
+    "us:gerar": "npm install --no-save --no-audit --no-fund @duckdb/node-api && node --max-old-space-size=8192 scripts/us/build.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

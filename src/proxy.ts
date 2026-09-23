@@ -57,8 +57,8 @@ export function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     {
-      // Páginas apenas: a API e os arquivos estáticos (inclusive os dados da Receita em /cnpj) não precisam de CSP com nonce.
-      source: '/((?!api|_next/static|_next/image|favicon.ico|cnpj/).*)',
+      // Páginas apenas: a API e os arquivos estáticos (inclusive os dados em /cnpj e /us) não precisam de CSP com nonce.
+      source: '/((?!api|_next/static|_next/image|favicon.ico|cnpj/|us/).*)',
       missing: [
         { type: 'header', key: 'next-router-prefetch' },
         { type: 'header', key: 'purpose', value: 'prefetch' },

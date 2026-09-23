@@ -127,8 +127,25 @@ export function cleanPhone(phone: string, country: string, uf?: string): string 
     return NO_PHONE;
   }
 
+  if (country === "us") {
+    // Plano de numeração da América do Norte: 10 dígitos (DDD de 3 + 7), com ou sem o 1 do país.
+    if (digits.length === 11 && digits.startsWith("1")) digits = digits.slice(1);
+    if (digits.length !== 10) return NO_PHONE;
+    const area = digits.slice(0, 3);
+    const exchange = digits.slice(3, 6);
+    // DDD e prefixo começam de 2 a 9 e não são N11; 8XX/900 são gratuitos/pagos (não levam ao dono);
+    // 555-01XX é número de filme.
+    if (!/^[2-9]\d\d$/.test(area) || /^[2-9]11$/.test(area) || US_NON_GEOGRAPHIC.has(area)) return NO_PHONE;
+    if (!/^[2-9]\d\d$/.test(exchange) || /^[2-9]11$/.test(exchange)) return NO_PHONE;
+    if (exchange === "555" && digits.slice(6, 8) === "01") return NO_PHONE;
+    return `(${area}) ${exchange}-${digits.slice(6)}`;
+  }
+
   return digits.length >= 8 && digits.length <= 15 ? phone.trim() : NO_PHONE;
 }
+
+// Números dos EUA sem cidade: gratuitos (800...), pagos (900) e serviços especiais.
+const US_NON_GEOGRAPHIC = new Set(["800", "822", "833", "844", "855", "866", "877", "888", "880", "881", "882", "883", "884", "885", "886", "887", "889", "900", "500", "521", "522", "523", "524", "525", "526", "527", "528", "529", "533", "544", "566", "577", "588", "600", "700", "710"]);
 
 /** Limpa uma lista de números (vários campos, vários números por campo), sem repetir. */
 export function cleanPhones(raws: (string | undefined)[], country: string, uf?: string): string[] {
@@ -219,8 +236,11 @@ export interface ScoreInput {
   hasEmail: boolean;
   /** Anos desde a última atualização/conferência do cadastro, quando a fonte informa. */
   ageYears?: number;
-  /** Empresa aberta há até 2 anos (Receita): ainda montando a presença online, a melhor hora para vender site. */
-  newCompany?: boolean;
+  /**
+   * O telefone foi confirmado (site da empresa, Google, ou cadastro da Receita de empresa com até 6 anos):
+   * é mais provável que ainda seja do dono.
+   */
+  phoneConfirmed?: boolean;
 }
 
 /**
@@ -231,7 +251,8 @@ export interface ScoreInput {
  *   confirmação vale menos: pode não ter WhatsApp.
  * - Sem nenhuma avaliação costuma ser negócio parado ou recém-aberto.
  * - Cadastro sem atualização há anos: a empresa pode ter fechado ou trocado de número.
- * - Empresa aberta há até 2 anos (Receita): ainda montando a presença online.
+ * - Telefone confirmado vale um pouco mais. A idade da empresa NÃO dá ponto: antes a empresa nova ganhava +10 e
+ *   a lista virava só empresa recém-aberta (e muitas delas só tinham e-mail, sem número).
  */
 export function scoreLead(input: ScoreInput): number {
   let score = 0;
@@ -260,7 +281,7 @@ export function scoreLead(input: ScoreInput): number {
     if (input.ageYears >= 5) score -= 20;
     else if (input.ageYears >= 3) score -= 10;
   }
-  if (input.newCompany) score += 10;
+  if (input.phoneConfirmed) score += 5;
 
   return Math.max(0, Math.min(score, 100));
 }

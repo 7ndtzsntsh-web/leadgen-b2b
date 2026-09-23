@@ -30,6 +30,13 @@ const SOCIAL_HOSTS = [
   // Plataformas de academia, cardápio e delivery: a página é da plataforma ("Sharks Gym" apontava para o TotalPass).
   "totalpass.com", "wellhub.com", "gympass.com", "goomer.app", "anota.ai", "menudino.com", "cardapioweb.com",
   "aiqfome.com", "ubereats.com", "deliverymuch.com.br", "linktree.com.br",
+  // EUA (mesma lista de scripts/us/build.mjs): diretórios, delivery, agendamento. business.site era o site grátis do
+  // Google, desligado em 2024.
+  "yellowpages.com", "bbb.org", "nextdoor.com", "mapquest.com", "angi.com", "angieslist.com", "homeadvisor.com",
+  "thumbtack.com", "houzz.com", "doordash.com", "grubhub.com", "seamless.com", "postmates.com", "order.online",
+  "toasttab.com", "opentable.com", "resy.com", "vagaro.com", "booksy.com", "styleseat.com", "schedulicity.com",
+  "fresha.com", "business.site", "zocdoc.com", "healthgrades.com", "avvo.com", "justia.com", "findlaw.com",
+  "lawyers.com", "realtor.com", "zillow.com", "carfax.com", "cars.com", "tripadvisor.com",
 ];
 
 // Páginas padrão de servidor / domínio estacionado / conta suspensa: existem, mas não são um site.
