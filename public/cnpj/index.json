@@ -1,10 +1,140 @@
 {
  "fonte": "Receita Federal - Dados Abertos CNPJ",
  "ufs": {
+  "AC": {
+   "mes": "2026-09",
+   "empresas": 8749,
+   "cidades": 22
+  },
+  "AL": {
+   "mes": "2026-09",
+   "empresas": 23990,
+   "cidades": 102
+  },
+  "AM": {
+   "mes": "2026-09",
+   "empresas": 38631,
+   "cidades": 62
+  },
+  "AP": {
+   "mes": "2026-09",
+   "empresas": 9480,
+   "cidades": 16
+  },
+  "BA": {
+   "mes": "2026-09",
+   "empresas": 142987,
+   "cidades": 417
+  },
+  "CE": {
+   "mes": "2026-09",
+   "empresas": 70906,
+   "cidades": 184
+  },
+  "DF": {
+   "mes": "2026-09",
+   "empresas": 61736,
+   "cidades": 1
+  },
+  "ES": {
+   "mes": "2026-09",
+   "empresas": 47169,
+   "cidades": 78
+  },
+  "GO": {
+   "mes": "2026-09",
+   "empresas": 112876,
+   "cidades": 246
+  },
+  "MA": {
+   "mes": "2026-09",
+   "empresas": 56378,
+   "cidades": 217
+  },
+  "MG": {
+   "mes": "2026-09",
+   "empresas": 208934,
+   "cidades": 853
+  },
+  "MS": {
+   "mes": "2026-09",
+   "empresas": 41312,
+   "cidades": 79
+  },
+  "MT": {
+   "mes": "2026-09",
+   "empresas": 72328,
+   "cidades": 142
+  },
+  "PA": {
+   "mes": "2026-09",
+   "empresas": 71331,
+   "cidades": 144
+  },
+  "PB": {
+   "mes": "2026-09",
+   "empresas": 36946,
+   "cidades": 223
+  },
+  "PE": {
+   "mes": "2026-09",
+   "empresas": 68035,
+   "cidades": 185
+  },
+  "PI": {
+   "mes": "2026-09",
+   "empresas": 34134,
+   "cidades": 224
+  },
+  "PR": {
+   "mes": "2026-09",
+   "empresas": 161288,
+   "cidades": 399
+  },
+  "RJ": {
+   "mes": "2026-09",
+   "empresas": 125859,
+   "cidades": 92
+  },
+  "RN": {
+   "mes": "2026-09",
+   "empresas": 32799,
+   "cidades": 167
+  },
+  "RO": {
+   "mes": "2026-09",
+   "empresas": 20928,
+   "cidades": 52
+  },
+  "RR": {
+   "mes": "2026-09",
+   "empresas": 7339,
+   "cidades": 15
+  },
+  "RS": {
+   "mes": "2026-09",
+   "empresas": 126728,
+   "cidades": 497
+  },
   "SC": {
    "mes": "2026-09",
    "empresas": 142856,
    "cidades": 295
+  },
+  "SE": {
+   "mes": "2026-09",
+   "empresas": 19784,
+   "cidades": 75
+  },
+  "SP": {
+   "mes": "2026-09",
+   "empresas": 463211,
+   "cidades": 645
+  },
+  "TO": {
+   "mes": "2026-09",
+   "empresas": 23358,
+   "cidades": 139
   }
  }
 }

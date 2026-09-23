@@ -1,0 +1,210 @@
+{
+ "fonte": "Overture Maps Foundation (CDLA-Permissive-2.0)",
+ "versao": "2026-09-23.0",
+ "estados": {
+  "AK": {
+   "empresas": 1641,
+   "cidades": 95
+  },
+  "AL": {
+   "empresas": 15326,
+   "cidades": 515
+  },
+  "AR": {
+   "empresas": 10136,
+   "cidades": 460
+  },
+  "AZ": {
+   "empresas": 14420,
+   "cidades": 217
+  },
+  "CA": {
+   "empresas": 83703,
+   "cidades": 1087
+  },
+  "CO": {
+   "empresas": 12625,
+   "cidades": 315
+  },
+  "CT": {
+   "empresas": 9158,
+   "cidades": 228
+  },
+  "DC": {
+   "empresas": 1216,
+   "cidades": 3
+  },
+  "DE": {
+   "empresas": 2299,
+   "cidades": 59
+  },
+  "FL": {
+   "empresas": 65999,
+   "cidades": 613
+  },
+  "GA": {
+   "empresas": 29363,
+   "cidades": 576
+  },
+  "HI": {
+   "empresas": 3026,
+   "cidades": 75
+  },
+  "IA": {
+   "empresas": 8937,
+   "cidades": 752
+  },
+  "ID": {
+   "empresas": 5347,
+   "cidades": 203
+  },
+  "IL": {
+   "empresas": 30047,
+   "cidades": 1152
+  },
+  "IN": {
+   "empresas": 16258,
+   "cidades": 616
+  },
+  "KS": {
+   "empresas": 8265,
+   "cidades": 493
+  },
+  "KY": {
+   "empresas": 12946,
+   "cidades": 580
+  },
+  "LA": {
+   "empresas": 15961,
+   "cidades": 414
+  },
+  "MA": {
+   "empresas": 14758,
+   "cidades": 450
+  },
+  "MD": {
+   "empresas": 12624,
+   "cidades": 396
+  },
+  "ME": {
+   "empresas": 4414,
+   "cidades": 434
+  },
+  "MI": {
+   "empresas": 23773,
+   "cidades": 1216
+  },
+  "MN": {
+   "empresas": 10364,
+   "cidades": 785
+  },
+  "MO": {
+   "empresas": 15669,
+   "cidades": 817
+  },
+  "MS": {
+   "empresas": 10395,
+   "cidades": 349
+  },
+  "MT": {
+   "empresas": 3757,
+   "cidades": 229
+  },
+  "NC": {
+   "empresas": 28593,
+   "cidades": 709
+  },
+  "ND": {
+   "empresas": 2523,
+   "cidades": 290
+  },
+  "NE": {
+   "empresas": 5202,
+   "cidades": 420
+  },
+  "NH": {
+   "empresas": 3360,
+   "cidades": 236
+  },
+  "NJ": {
+   "empresas": 20798,
+   "cidades": 722
+  },
+  "NM": {
+   "empresas": 5517,
+   "cidades": 181
+  },
+  "NV": {
+   "empresas": 6314,
+   "cidades": 82
+  },
+  "NY": {
+   "empresas": 54399,
+   "cidades": 1582
+  },
+  "OH": {
+   "empresas": 26849,
+   "cidades": 1018
+  },
+  "OK": {
+   "empresas": 13681,
+   "cidades": 465
+  },
+  "OR": {
+   "empresas": 8897,
+   "cidades": 312
+  },
+  "PA": {
+   "empresas": 31882,
+   "cidades": 2125
+  },
+  "RI": {
+   "empresas": 2974,
+   "cidades": 61
+  },
+  "SC": {
+   "empresas": 14620,
+   "cidades": 344
+  },
+  "SD": {
+   "empresas": 2681,
+   "cidades": 274
+  },
+  "TN": {
+   "empresas": 19341,
+   "cidades": 508
+  },
+  "TX": {
+   "empresas": 86989,
+   "cidades": 1346
+  },
+  "UT": {
+   "empresas": 6344,
+   "cidades": 240
+  },
+  "VA": {
+   "empresas": 17597,
+   "cidades": 613
+  },
+  "VT": {
+   "empresas": 1728,
+   "cidades": 247
+  },
+  "WA": {
+   "empresas": 14369,
+   "cidades": 393
+  },
+  "WI": {
+   "empresas": 14919,
+   "cidades": 914
+  },
+  "WV": {
+   "empresas": 5386,
+   "cidades": 442
+  },
+  "WY": {
+   "empresas": 2072,
+   "cidades": 113
+  }
+ }
+}
