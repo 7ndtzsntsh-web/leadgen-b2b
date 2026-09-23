@@ -10,7 +10,8 @@
 // - sem marca (rede/franquia não compra site do dono local);
 // - com telefone válido da América do Norte (0800 e afins ficam de fora);
 // - SEM site próprio: só nenhum site ou só rede social/diretório (Yelp, Facebook...). Nos EUA ~75% já têm site.
-// - telefone usado por 3+ empresas com nomes diferentes é central de atendimento ou agência: sai.
+// - telefone usado por 3+ empresas com nomes diferentes é central de atendimento ou agência: sai. O e-mail também
+//   (e o de plataforma, entidade ou jornal: BBB, Facebook, Patch...), porque nos EUA a abordagem é por e-mail.
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -216,9 +217,33 @@ function usPhone(raw) {
   return d;
 }
 
+// E-mail que não é da empresa: de plataforma (Facebook, Yelp...), de entidade, jornal ou marca que aparece na ficha
+// de vários negócios (BBB, Patch, U-Haul) ou de exemplo. Nos EUA a abordagem é por e-mail: a mensagem de venda iria
+// para outra pessoa. (E-mail usado por 3+ empresas com nomes diferentes também sai, na 2ª passada.)
+const EMAIL_SHAPE = /^[a-z0-9._%+-]{1,64}@([a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63})+)$/;
+const NOT_THE_BUSINESS = [
+  ...PLATFORMS, "patch.com", "uhaul.com", "giftrocket.com", "deca.mil", "aarp.org", "thryv.com", "menupix.com",
+  "none.com", "example.com", "test.com",
+];
+function companyEmail(emails) {
+  for (const raw of emails ?? []) {
+    const email = String(raw).trim().toLowerCase();
+    const host = EMAIL_SHAPE.exec(email)?.[1];
+    if (!host || /(^|\.)bbb[a-z]*\.org$/.test(host)) continue;
+    if (NOT_THE_BUSINESS.some((d) => host === d || host.endsWith(`.${d}`))) continue;
+    return email;
+  }
+  return "";
+}
+
 const norm = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 const slug = (s) => norm(s).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const nameKey = (s) => norm(s).replace(/[^a-z0-9]/g, "");
+// Mesma regra de usCityKey (src/lib/usCities.ts): "St. Louis", "St Louis" e "Saint Louis" viram um arquivo só
+// (antes eram duas cidades, e a busca por uma não via as empresas da outra).
+const cityKey = (s) =>
+  norm(s).replace(/[.'’`]/g, "").replace(/\bsaint\b/g, "st").replace(/\bsainte\b/g, "ste").replace(/\bfort\b/g, "ft")
+    .replace(/\bmount\b/g, "mt").replace(/[\s-]+/g, " ").trim();
 const cityName = (s) => String(s).trim().replace(/\s+/g, " ").toLowerCase().replace(/(^|[\s-])(\p{L})/gu, (m, sep, ch) => sep + ch.toUpperCase());
 
 const quoted = allCats.map((c) => `'${c.replace(/'/g, "''")}'`).join(",");
@@ -238,11 +263,12 @@ const candidates = await rowsOf(`
     AND confidence >= ${MIN_CONFIDENCE}
     AND brand IS NULL
     AND name IS NOT NULL AND city IS NOT NULL AND state IS NOT NULL
-    AND len(list_filter(coalesce(websites, []), w -> NOT regexp_matches(lower(trim(w)), '${platformRe}'))) = 0`);
+    AND len(list_filter(coalesce(websites, []), w -> NOT regexp_matches(lower(trim(w)), '${platformRe}'))) = 0
+  ORDER BY id`); // ordem fixa: a mesma versão do Overture gera sempre os mesmos arquivos
 console.log(`${Number(counts.niche)} empresas dos nichos, abertas e sem marca; ${Number(counts.with_site)} já têm site próprio; ${candidates.length} sem site`);
 
-// 1ª passada: telefone limpo, sem site próprio; conta em quantos nomes diferentes cada telefone aparece.
-const phoneNames = new Map();
+// 1ª passada: telefone limpo, sem site próprio; conta em quantos nomes diferentes cada telefone e e-mail aparece.
+const contactNames = new Map();
 const kept = [];
 let withSite = 0;
 let noPhone = 0;
@@ -254,29 +280,31 @@ for (const r of candidates) {
   const phones = [...new Set((r.phones ?? []).map(usPhone).filter(Boolean))].slice(0, 2);
   if (!phones.length) { noPhone++; continue; }
   const key = nameKey(r.name);
-  for (const p of phones) {
-    if (!phoneNames.has(p)) phoneNames.set(p, new Set());
-    const names = phoneNames.get(p);
+  const email = companyEmail(r.emails);
+  for (const p of email ? [...phones, email] : phones) {
+    if (!contactNames.has(p)) contactNames.set(p, new Set());
+    const names = contactNames.get(p);
     if (names.size < SHARED) names.add(key);
   }
-  kept.push({ ...r, phones });
+  kept.push({ ...r, phones, email });
 }
 
-// 2ª passada: tira telefone de central/agência, repetidos na cidade, e monta as linhas.
+// 2ª passada: tira telefone e e-mail de central/agência/entidade, repetidos na cidade, e monta as linhas.
 const states = new Map();
 const centroids = new Map();
 let shared = 0;
 let duplicated = 0;
 for (const r of kept) {
-  const phones = r.phones.filter((p) => phoneNames.get(p).size < SHARED);
+  const phones = r.phones.filter((p) => contactNames.get(p).size < SHARED);
   if (!phones.length) { shared++; continue; }
   const city = cityName(r.city);
-  const citySlug = slug(city);
+  const citySlug = slug(cityKey(city));
   if (!citySlug) continue;
   if (!states.has(r.state)) states.set(r.state, new Map());
   const cities = states.get(r.state);
-  if (!cities.has(citySlug)) cities.set(citySlug, { city, rows: [], seen: new Map() });
+  if (!cities.has(citySlug)) cities.set(citySlug, { spellings: new Map(), rows: [], seen: new Map() });
   const entry = cities.get(citySlug);
+  entry.spellings.set(city, (entry.spellings.get(city) ?? 0) + 1);
   const dupKey = phones[0];
   const previous = entry.seen.get(dupKey);
   const conf = Math.round(Number(r.confidence) * 100);
@@ -286,7 +314,7 @@ for (const r of kept) {
     entry.rows.splice(entry.rows.indexOf(previous), 1);
   }
   const social = [...(r.socials ?? []), ...(r.websites ?? [])].find((u) => hostOf(u)) ?? "";
-  const email = (r.emails ?? []).find((e) => /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(e))?.toLowerCase() ?? "";
+  const email = r.email && contactNames.get(r.email).size < SHARED ? r.email : "";
   const row = [
     String(r.id).replace(/-/g, "").slice(0, 16),
     String(r.name).trim(),
@@ -309,7 +337,7 @@ for (const r of kept) {
 // Gravação: mesmo formato de public/cnpj.
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
-const total = { companies: 0, cities: 0, files: 0, bytes: 0, biggest: 0 };
+const total = { companies: 0, emails: 0, cities: 0, files: 0, bytes: 0, biggest: 0 };
 const summary = {};
 const cityList = [];
 for (const [state, cities] of [...states].sort(([a], [b]) => a.localeCompare(b))) {
@@ -323,9 +351,12 @@ for (const [state, cities] of [...states].sort(([a], [b]) => a.localeCompare(b))
     total.bytes += body.length;
     total.biggest = Math.max(total.biggest, body.length);
   };
-  for (const [citySlug, { city, rows }] of [...cities].sort(([a], [b]) => a.localeCompare(b))) {
+  for (const [citySlug, { spellings, rows }] of [...cities].sort(([a], [b]) => a.localeCompare(b))) {
+    // Nome da cidade: a grafia mais usada nas fichas ("St. Louis" x "St Louis"), para sair igual em toda geração.
+    const [city] = [...spellings].sort(([a, n], [b, m]) => m - n || a.localeCompare(b))[0];
     rows.sort((a, b) => a[0].localeCompare(b[0]));
     companies += rows.length;
+    total.emails += rows.filter((row) => row[6]).length;
     const file = (linhas) => JSON.stringify({ versao: release, cidade: city, estado: state, campos: FIELDS, linhas });
     if (rows.length <= SPLIT_ROWS) {
       write(join(dir, `${citySlug}.json`), file(rows));
@@ -359,7 +390,7 @@ const listed = cityList.filter((c) => c[2] >= MIN_CITY_LEADS).sort((a, b) => b[2
 writeFileSync(join("src", "lib", "data", "usCities.json"), JSON.stringify(listed) + "\n");
 
 console.log(
-  `\nGravadas: ${total.companies} empresas em ${total.cities} cidades de ${states.size} estados, ` +
+  `\nGravadas: ${total.companies} empresas (${total.emails} com e-mail) em ${total.cities} cidades de ${states.size} estados, ` +
     `${(total.bytes / 1e6).toFixed(1)} MB em ${total.files} arquivos (maior: ${(total.biggest / 1e6).toFixed(1)} MB)\n` +
     `Fora: ${withSite} com site próprio, ${noPhone} sem telefone válido, ${shared} com telefone de central/agência, ` +
     `${duplicated} repetidas, ${badState} fora dos estados | ${((Date.now() - t0) / 60000).toFixed(1)} min`,

@@ -54,6 +54,9 @@ node_modules/.bin/jiti arquivo.ts                   # teste de lógica (não há
   derruba o selo VERIFICADO. Não usar `info` para esconder o que DÁ para checar.
 - **Lead sem telefone nem WhatsApp não entra** (só e-mail não serve: o dono reclamou de empresas "sem número").
   O e-mail ainda é usado no caminho: o domínio dele pode levar ao site, e o site ao telefone.
+- E-mail do lead (`fixEmailTypo` e `isAccountantEmail` em `src/lib/emailCheck.ts`): provedor digitado errado vira o certo
+  ("gamil.com" -> gmail.com; eram milhares, e o e-mail iria para o domínio de outra pessoa); e-mail de contador
+  ("contabilidadexyz@", "joao.contador@") sai, a não ser que a empresa seja de contabilidade. Depois, o MX é conferido.
 - **Idade da empresa não dá ponto.** Antes a empresa nova ganhava +10 e a Receita vinha "da mais nova para a mais
   velha": a lista virava só empresa recém-aberta. Agora a ordem da Receita é por faixa (`cnpjTier`: celular com
   telefone recente primeiro, até 6 anos), misturada de um jeito fixo dentro da faixa (`mixKey`), e o telefone
@@ -98,12 +101,19 @@ node_modules/.bin/jiti arquivo.ts                   # teste de lógica (não há
 - Entram só: abertas, confiança de existir >= 60%, **sem marca** (rede/franquia), com telefone válido da América do
   Norte (`cleanPhone` "us": 10 dígitos, DDD válido, sem 800/888...) e **sem site próprio** (nenhum, ou só rede
   social/diretório: Yelp, Facebook, DoorDash, business.site...). Nos EUA ~75% já têm site: por isso só os sem site.
-  Telefone usado por 3+ empresas com nomes diferentes (central/agência) sai.
+  Telefone usado por 3+ empresas com nomes diferentes (central/agência) sai. O e-mail também, e o de plataforma,
+  entidade ou jornal (BBB, Facebook, Patch, U-Haul: `companyEmail`), porque nos EUA a abordagem é por e-mail.
 - Nicho -> categorias do Overture: `NICHES` em `scripts/us/build.mjs` (grava `src/lib/data/nicheOverture.json`).
   A busca aceita o nicho em português ou a categoria em inglês ("barber", "nail salon").
 - Cidades (autocompletar "Miami - FL" e vizinhas num raio de 60 km): `src/lib/data/usCities.json`, gerado junto.
+  "St. Louis", "St Louis" e "Saint Louis" são a mesma cidade (`usCityKey` / `cityKey`: Saint/Fort/Mount viram St/Ft/Mt,
+  sem ponto nem apóstrofo). Antes eram arquivos separados e a busca por uma não via as empresas da outra.
 - Verificação: telefone "da ficha do Overture, atualizada em MM/AAAA" conta como confirmado se a ficha tem até 2
-  anos; "aberta" conta se a confiança for >= 80%. Nos EUA não há WhatsApp nem celular identificável: o botão é Ligar.
+  anos; "aberta" conta se a confiança for >= 80%.
+- **Nos EUA não há WhatsApp: o botão de mensagem é "E-mail"** (abre o app de e-mail com assunto e texto em inglês,
+  `buildEmailSubject`/`buildEmailBody`), e "Ligar" continua. Não há como saber se o número é celular: sem selo CEL/FIXO.
+  Por isso, entre as fichas com confiança >= 80%, vêm primeiro as que têm e-mail (~34% têm). Os botões usam o país
+  da BUSCA (`searched`), não o selecionado depois na tela (senão o DDI mudava).
 - Atualizar todo mês (o Overture publica uma versão por mês; o comando acha a mais recente sozinho):
   ```bash
   npm run us:gerar                   # ~15 min na 1ª vez (baixa ~1,5 GB para .cache/overture); depois ~2 min

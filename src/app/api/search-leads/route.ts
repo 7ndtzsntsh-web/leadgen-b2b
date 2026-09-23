@@ -10,7 +10,7 @@ import { AsyncQueue, runPool } from '@/lib/async';
 import { acquireSlot, guardApi } from '@/lib/apiGuard';
 import { normalizeText } from '@/lib/text';
 import { areaKey, checkAddress, type AddressCheck, type SearchedArea, type StructuredAddress } from '@/lib/address';
-import { checkEmailDomain } from '@/lib/emailCheck';
+import { checkEmailDomain, fixEmailTypo, isAccountantEmail } from '@/lib/emailCheck';
 import { candidateDomains, findOwnWebsite, siteFromEmail } from '@/lib/siteFinder';
 import { CNPJ_UFS, loadCompanies, nicheFilter, type NicheFilter } from '@/lib/cnpjSource';
 import { US_STATES, loadUsCompanies, usNicheFilter, type UsNicheFilter } from '@/lib/usSource';
@@ -277,7 +277,8 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
   // O domínio do e-mail precisa existir e receber mensagens; senão o e-mail é descartado (não vai para o lead).
   let emailDomain: 'ok' | 'unknown' | undefined;
   if (email !== 'N/D') {
-    const status = await checkEmailDomain(email);
+    email = fixEmailTypo(email); // "gamil.com" -> "gmail.com": senão a mensagem iria para o domínio de outra pessoa
+    const status = isAccountantEmail(email, raw.name) ? 'invalid' : await checkEmailDomain(email);
     if (status === 'invalid') email = 'N/D';
     else emailDomain = status;
   }
@@ -669,8 +670,10 @@ async function collectFromOverture(ctx: MiningContext, queue: AsyncQueue<RawLead
   const companies = await loadUsCompanies(ctx.origin, loc.uf, loc.city, filter);
   if (!companies) return;
 
-  const tierOf = (c: { confidence: number; updated: string }) =>
-    (c.confidence >= OVERTURE_SURE ? 0 : 2) + (c.updated && yearsSince(c.updated) <= OVERTURE_FRESH_YEARS ? 0 : 1);
+  // Nos EUA não há WhatsApp: a abordagem é por e-mail (e ligação). Por isso, entre as que certamente existem, vem
+  // primeiro quem tem e-mail; depois a ficha mais recente.
+  const tierOf = (c: { confidence: number; updated: string; email: string }) =>
+    (c.confidence >= OVERTURE_SURE ? 0 : 4) + (c.email ? 0 : 2) + (c.updated && yearsSince(c.updated) <= OVERTURE_FRESH_YEARS ? 0 : 1);
   const found = companies
     .map((c) => ({ c, phones: cleanPhones(c.phones, 'us'), tier: tierOf(c), mix: mixKey(c.id) }))
     .filter(({ phones }) => phones.length > 0)

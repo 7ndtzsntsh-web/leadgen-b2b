@@ -14,11 +14,26 @@ export interface UsCity {
   norm: string;
 }
 
-const CITIES: UsCity[] = (raw as Row[]).map(([name, state, leads, lat, lon]) => ({ name, state, leads, lat, lon, norm: normalizeText(name) }));
+/**
+ * Chave do nome da cidade: "St. Louis", "St Louis" e "Saint Louis" são a mesma (as fichas escrevem de todo jeito).
+ * Mesma regra de cityKey em scripts/us/build.mjs, que usa esta chave no nome do arquivo da cidade.
+ */
+export function usCityKey(name: string): string {
+  return normalizeText(name)
+    .replace(/[.'’`]/g, "")
+    .replace(/\bsaint\b/g, "st")
+    .replace(/\bsainte\b/g, "ste")
+    .replace(/\bfort\b/g, "ft")
+    .replace(/\bmount\b/g, "mt")
+    .replace(/[\s-]+/g, " ")
+    .trim();
+}
+
+const CITIES: UsCity[] = (raw as Row[]).map(([name, state, leads, lat, lon]) => ({ name, state, leads, lat, lon, norm: usCityKey(name) }));
 
 /** Encontra a cidade pelo nome. Homônimas sem estado ("Springfield"): a que tem mais leads. */
 export function findUsCity(name: string, state?: string): UsCity | undefined {
-  const norm = normalizeText(name);
+  const norm = usCityKey(name);
   const st = state?.toUpperCase();
   const matches = CITIES.filter((c) => c.norm === norm && (!st || c.state === st));
   if (matches.length === 0) return undefined;
@@ -27,7 +42,7 @@ export function findUsCity(name: string, state?: string): UsCity | undefined {
 
 /** Sugestões "Nome - UF" para o autocomplete (prefixo primeiro, depois "contém"), as com mais leads antes. */
 export function searchUsCities(query: string, limit = 8): string[] {
-  const q = normalizeText(query.split(" - ")[0]);
+  const q = usCityKey(query.split(" - ")[0]);
   if (q.length < 2) return [];
   const byLeads = (a: UsCity, b: UsCity) => b.leads - a.leads;
   const starts = CITIES.filter((c) => c.norm.startsWith(q)).sort(byLeads);
