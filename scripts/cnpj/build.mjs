@@ -90,7 +90,7 @@ function displayName(s) {
   let name = titleCase(s);
   for (let prev = ""; prev !== name; ) {
     prev = name;
-    name = name.replace(/[\s,.-]+(LTDA|ME|EPP|EIRELI|MEI|S\/A|SA|S\.A\.?)\.?$/i, "").trim();
+    name = name.replace(/[\s,.-]+(LTDA|LIMITADA|ME|EPP|EIRELI|MEI|S\/A|SA|S\.A\.?)\.?$/i, "").trim();
   }
   return name;
 }

@@ -52,8 +52,14 @@ node_modules/.bin/jiti arquivo.ts                   # teste de lógica (não há
 - Toda frase de checagem tem que ser verdadeira: "confirmado" só quando houve confirmação de verdade.
 - Checagem `info: true` (ex.: WhatsApp de celular, que não dá para confirmar de graça) aparece em cinza e não
   derruba o selo VERIFICADO. Não usar `info` para esconder o que DÁ para checar.
+- **Lead sem telefone nem WhatsApp não entra** (só e-mail não serve: o dono reclamou de empresas "sem número").
+  O e-mail ainda é usado no caminho: o domínio dele pode levar ao site, e o site ao telefone.
+- **Idade da empresa não dá ponto.** Antes a empresa nova ganhava +10 e a Receita vinha "da mais nova para a mais
+  velha": a lista virava só empresa recém-aberta. Agora a ordem da Receita é por faixa (`cnpjTier`: celular com
+  telefone recente primeiro, até 6 anos), misturada de um jeito fixo dentro da faixa (`mixKey`), e o telefone
+  confirmado vale +5 na nota.
 
-## Cadastro de CNPJ da Receita Federal (fonte principal nos estados que têm os dados)
+## Cadastro de CNPJ da Receita Federal (fonte principal no Brasil: 27 estados, 5.571 cidades)
 
 - Dados abertos da Receita em `public/cnpj` (formato em `scripts/cnpj/output.mjs`). Estados ativos: os de
   `public/cnpj/index.json`. Cidade com até 6.000 empresas é um arquivo (`<uf>/<cidade>.json`); maior vira uma pasta
@@ -83,6 +89,27 @@ node_modules/.bin/jiti arquivo.ts                   # teste de lógica (não há
 - Nicho novo: acrescentar em `nicheCnaes.json` conferindo o código na tabela `Cnaes.zip` e rodar o gerar.
 - Celular: alvos de toque com 44px (`h-11 md:h-8`); campos com letra de 16px (o iPhone não dá zoom).
 - PRs do Dependabot com salto grande de versão: decisão do dono.
+
+## EUA: Overture Maps (fonte principal nos EUA)
+
+- Nos EUA não existe cadastro público com telefone como o da Receita. A fonte é o **Overture Maps** (base aberta de
+  empresas com dados de Meta, Microsoft, Amazon e outras; licença CDLA-Permissive-2.0), em `public/us`, no mesmo
+  formato de `public/cnpj` (ramo = categoria do Overture). Estados ativos: os de `public/us/index.json`.
+- Entram só: abertas, confiança de existir >= 60%, **sem marca** (rede/franquia), com telefone válido da América do
+  Norte (`cleanPhone` "us": 10 dígitos, DDD válido, sem 800/888...) e **sem site próprio** (nenhum, ou só rede
+  social/diretório: Yelp, Facebook, DoorDash, business.site...). Nos EUA ~75% já têm site: por isso só os sem site.
+  Telefone usado por 3+ empresas com nomes diferentes (central/agência) sai.
+- Nicho -> categorias do Overture: `NICHES` em `scripts/us/build.mjs` (grava `src/lib/data/nicheOverture.json`).
+  A busca aceita o nicho em português ou a categoria em inglês ("barber", "nail salon").
+- Cidades (autocompletar "Miami - FL" e vizinhas num raio de 60 km): `src/lib/data/usCities.json`, gerado junto.
+- Verificação: telefone "da ficha do Overture, atualizada em MM/AAAA" conta como confirmado se a ficha tem até 2
+  anos; "aberta" conta se a confiança for >= 80%. Nos EUA não há WhatsApp nem celular identificável: o botão é Ligar.
+- Atualizar todo mês (o Overture publica uma versão por mês; o comando acha a mais recente sozinho):
+  ```bash
+  npm run us:gerar                   # ~15 min na 1ª vez (baixa ~1,5 GB para .cache/overture); depois ~2 min
+  ```
+  O DuckDB (lê os arquivos do Overture) é instalado pelo próprio comando e NÃO vai para o package.json: senão a
+  Vercel baixaria o binário dele em toda publicação.
 
 ## Sessão na nuvem (aberta pelo celular, com o PC do dono desligado)
 

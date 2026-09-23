@@ -5,7 +5,7 @@ export const maxDuration = 300;
 import { NextRequest } from 'next/server';
 import { expandSearchTerm, placeTypeTerms } from '@/lib/semanticDictionary';
 import { resolveLocations, type SearchLocation } from '@/lib/locations';
-import { inspectWebsite, type SiteInspection } from '@/lib/domainValidator';
+import { getHostname, inspectWebsite, isSocialHost, type SiteInspection } from '@/lib/domainValidator';
 import { AsyncQueue, runPool } from '@/lib/async';
 import { acquireSlot, guardApi } from '@/lib/apiGuard';
 import { normalizeText } from '@/lib/text';
@@ -13,10 +13,11 @@ import { areaKey, checkAddress, type AddressCheck, type SearchedArea, type Struc
 import { checkEmailDomain } from '@/lib/emailCheck';
 import { candidateDomains, findOwnWebsite, siteFromEmail } from '@/lib/siteFinder';
 import { CNPJ_UFS, loadCompanies, nicheFilter, type NicheFilter } from '@/lib/cnpjSource';
+import { US_STATES, loadUsCompanies, usNicheFilter, type UsNicheFilter } from '@/lib/usSource';
 import { UF_NAMES } from '@/lib/ufData';
-import { buildChecks, isOwnSiteLive, isVerified, yearsSince, type PhoneOrigin, type WhatsAppOrigin } from '@/lib/verification';
+import { OVERTURE_FRESH_YEARS, OVERTURE_SURE, RECEITA_PHONE_FRESH_YEARS, buildChecks, isOwnSiteLive, isVerified, yearsSince, type PhoneOrigin, type WhatsAppOrigin } from '@/lib/verification';
 import {
-  NO_PHONE, cleanPhone, cleanPhones, getPhoneType, isNewCompany, matchesSiteFilters, pickWhatsApp, sameNumber, scoreLead, splitPhones,
+  NO_PHONE, cleanPhone, cleanPhones, getPhoneType, matchesSiteFilters, pickWhatsApp, sameNumber, scoreLead, splitPhones,
   type SiteStatus,
 } from '@/lib/leadRules';
 
@@ -57,6 +58,8 @@ const BUSINESS_CATEGORIES = new Set(['amenity', 'shop', 'craft', 'office', 'leis
 const STALE_DROP_YEARS = 8;
 // A partir daqui o lead aparece com aviso de dados antigos.
 const STALE_WARN_YEARS = 5;
+// De onde vem o telefone listado, antes de conferir no site da empresa.
+const LISTED_ORIGIN: Record<RawLead['source'], PhoneOrigin> = { google: 'google', cnpj: 'receita', overture: 'overture', osm: 'cadastro' };
 
 interface GooglePlace {
   id: string;
@@ -86,8 +89,11 @@ interface NominatimPlace {
 
 interface RawLead {
   id: string;
-  /** cnpj = cadastro da Receita Federal (dados abertos). */
-  source: 'google' | 'osm' | 'cnpj';
+  /** cnpj = cadastro da Receita Federal (dados abertos); overture = Overture Maps (EUA). */
+  source: 'google' | 'osm' | 'cnpj' | 'overture';
+  /** Overture: confiança de que o lugar existe (0 a 100) e mês da última atualização da ficha (AAAA-MM). */
+  confidence?: number;
+  listingUpdated?: string;
   /** E-mail do cadastro da Receita (os de contador já saem na importação). */
   email?: string;
   cnpj?: string;
@@ -161,7 +167,7 @@ function acceptPlace(ctx: MiningContext, queue: AsyncQueue<RawLead>, loc: Search
   // Por cidade: "Padaria Pão Quente" em Florianópolis e em São José são empresas diferentes.
   const cityNameKey = `${normalizeText(loc.city)}|${nameKey}`;
   if (ctx.knownNames.has(cityNameKey)) return true;
-  if (raw.source === 'cnpj') ctx.knownNames.add(cityNameKey);
+  if (raw.source === 'cnpj' || raw.source === 'overture') ctx.knownNames.add(cityNameKey);
   const occurrences = (ctx.nameCounts.get(nameKey) ?? 0) + 1;
   ctx.nameCounts.set(nameKey, occurrences);
   if (nameKey.length > 3 && occurrences > 2) return true;
@@ -192,7 +198,9 @@ function buildSearchedArea(locations: SearchLocation[]): SearchedArea {
 /** Verifica o site, aplica os filtros, pontua e envia o lead. */
 async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
   if (ctx.isDone()) return;
-  if (!raw.website && raw.phone === NO_PHONE && !raw.whatsapp && !raw.email) return; // sem nenhum canal de contato
+  // Sem nenhum canal de contato. (Só e-mail ainda serve aqui: o domínio do e-mail pode levar ao site, e o site ao
+  // telefone. No fim, lead sem telefone é descartado.)
+  if (!raw.website && raw.phone === NO_PHONE && !raw.whatsapp && !raw.email) return;
 
   // Confere o endereço ANTES de gastar tempo no site: resultado de outro estado é descartado, e a cidade real
   // do endereço é a que vai no texto de abordagem (não a cidade pesquisada).
@@ -204,20 +212,23 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
 
   const listedPhones = [raw.phone, ...(raw.otherPhones ?? [])].filter((p) => p !== NO_PHONE);
 
-  // Sem site no cadastro: procura pelo nome (padariaxyz.com.br), aceitando só o que for comprovadamente da empresa.
+  // Sem site no cadastro (ou só rede social/diretório, que o cadastro pode ter no lugar do site): procura pelo nome
+  // (padariaxyz.com.br), aceitando só o que for comprovadamente da empresa. Achando, o site próprio vale; senão, a
+  // rede social continua.
   let website = raw.website;
   let siteFound: string | undefined;
   let siteFoundVia: 'email' | 'nome' | undefined;
   let siteSearched: string[] | undefined;
-  if (!website && raw.source !== 'google') {
+  const listedHost = website ? getHostname(website) : undefined;
+  if ((!website || (listedHost && isSocialHost(listedHost))) && raw.source !== 'google') {
     const city = addressCheck && 'city' in addressCheck && addressCheck.city ? addressCheck.city : raw.expansionSource;
     const clues = { phones: listedPhones, city, country: ctx.country };
     // Primeiro o domínio do e-mail da empresa (contato@padariaxyz.com.br), depois o nome.
     const fromEmail = raw.email ? await siteFromEmail(raw.email, raw.name, clues) : undefined;
     siteFound = fromEmail ?? (await findOwnWebsite(raw.name, clues));
     siteFoundVia = fromEmail ? 'email' : 'nome';
-    website = siteFound;
-    if (!siteFound) siteSearched = candidateDomains(raw.name, ctx.country).candidates.map((c) => c.host);
+    if (siteFound) website = siteFound;
+    else siteSearched = candidateDomains(raw.name, ctx.country).candidates.map((c) => c.host);
   }
 
   let siteStatus: SiteStatus = 'Sem Site';
@@ -235,7 +246,7 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
   // se o site mostra OUTRO número, vale o do site (era de onde vinham os "números errados").
   let phone = raw.phone;
   let otherPhones = raw.otherPhones ?? [];
-  let phoneOrigin: PhoneOrigin = raw.source === 'google' ? 'google' : raw.source === 'cnpj' ? 'receita' : 'cadastro';
+  let phoneOrigin: PhoneOrigin = LISTED_ORIGIN[raw.source];
   let phoneReplaced = false;
   const sitePhones = siteLive && inspection ? cleanPhones(inspection.phones, ctx.country, raw.uf) : [];
   if (sitePhones.length > 0) {
@@ -273,7 +284,9 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
 
   // Depois de cada await a meta pode já ter sido atingida por outro lead.
   if (ctx.isDone()) return;
-  if (phone === NO_PHONE && email === 'N/D' && !whatsapp) return;
+  // Lead bom é lead que dá para chamar: sem telefone nem WhatsApp fica de fora, mesmo com e-mail
+  // (o dono reclamou de empresas "sem número" na lista).
+  if (phone === NO_PHONE && !whatsapp) return;
   if (!matchesSiteFilters(siteStatus, ctx.onlyNoSite, ctx.onlyInsecure)) return;
 
   const phoneType = getPhoneType(phone, ctx.country);
@@ -292,6 +305,8 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
     siteSearched,
     activeConfirmed: raw.activeConfirmed,
     cnpjActive: raw.source === 'cnpj',
+    overtureConfidence: raw.confidence,
+    listingUpdated: raw.listingUpdated,
     openedOn: raw.openedOn,
     lastEdit: raw.lastEdit,
     checkedOn: raw.checkedOn,
@@ -308,7 +323,7 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
     hasPhone: phone !== NO_PHONE || !!whatsapp,
     hasEmail: email !== 'N/D',
     ageYears,
-    newCompany: isNewCompany(raw.openedOn),
+    phoneConfirmed: checks.some((c) => c.key === 'telefone' && c.ok),
   });
 
   ctx.streamed++;
@@ -579,19 +594,44 @@ async function collectFromNominatim(
 // ---------------------------------------------------------------------------
 
 /**
+ * Ordem das empresas da Receita (menor = antes). Antes era "a mais nova primeiro", e a lista virava só empresa
+ * recém-aberta. Agora:
+ *   0. celular e empresa com até 6 anos (o telefone do cadastro ainda deve ser do dono: RECEITA_PHONE_FRESH_YEARS);
+ *   1. celular de empresa mais antiga (pode ter trocado de número);
+ *   2. só fixo, empresa com até 6 anos;
+ *   3. só fixo, empresa mais antiga.
+ */
+function cnpjTier(c: { openedOn: string }, phones: string[], country: string): number {
+  const mobile = phones.some((p) => getPhoneType(p, country) === 'MOBILE');
+  const fresh = yearsSince(c.openedOn) <= RECEITA_PHONE_FRESH_YEARS;
+  return (mobile ? 0 : 2) + (fresh ? 0 : 1);
+}
+
+/**
+ * Embaralha de um jeito fixo (mesmo CNPJ, mesma posição) dentro de cada faixa, para misturar empresas novas e
+ * estabelecidas. A mesma busca continua trazendo os mesmos leads.
+ */
+function mixKey(cnpj: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < cnpj.length; i++) h = Math.imul(h ^ cnpj.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
+
+/**
  * Empresas ATIVAS do nicho na cidade, direto do cadastro oficial. Vem antes do mapa: tem muito mais empresas
- * com telefone e confirma que o CNPJ está ativo. Primeiro as que têm celular e as abertas mais recentemente
- * (as que mais provavelmente ainda não têm site).
+ * com telefone e confirma que o CNPJ está ativo. Ordem em `cnpjTier` e `mixKey`.
  */
 async function collectFromCnpj(ctx: MiningContext, queue: AsyncQueue<RawLead>, loc: SearchLocation, term: string, filter: NicheFilter): Promise<void> {
   if (ctx.country !== 'br' || !loc.uf || !CNPJ_UFS.has(loc.uf) || loc.scope === 'region') return;
   const companies = await loadCompanies(ctx.origin, loc.uf, loc.city, filter);
   if (!companies) return;
 
-  const found = companies.map((c) => ({ c, phones: cleanPhones(c.phones, ctx.country, loc.uf) }));
-  const hasMobile = (phones: string[]) => phones.some((p) => getPhoneType(p, ctx.country) === 'MOBILE');
-  found.sort((a, b) =>
-    Number(hasMobile(b.phones)) - Number(hasMobile(a.phones)) || b.c.openedOn.localeCompare(a.c.openedOn) || a.c.cnpj.localeCompare(b.c.cnpj));
+  // Só entra quem tem telefone utilizável: empresa só com e-mail não é chance boa de venda.
+  const found = companies
+    .map((c) => ({ c, phones: cleanPhones(c.phones, ctx.country, loc.uf) }))
+    .filter(({ phones }) => phones.length > 0)
+    .map((f) => ({ ...f, tier: cnpjTier(f.c, f.phones, ctx.country), mix: mixKey(f.c.cnpj) }));
+  found.sort((a, b) => a.tier - b.tier || a.mix - b.mix || a.c.cnpj.localeCompare(b.c.cnpj));
 
   for (const { c, phones } of found) {
     if (ctx.isDone()) return;
@@ -610,6 +650,47 @@ async function collectFromCnpj(ctx: MiningContext, queue: AsyncQueue<RawLead>, l
       openedOn: c.openedOn,
       address: [c.street, c.district].filter(Boolean).join(' - ') + `, ${loc.city} - ${loc.uf}, ${cep}`,
       place: { cities: [loc.city], uf: loc.uf },
+      rating: 0,
+      reviewsCount: 0,
+      reviewsKnown: false,
+      activeConfirmed: false,
+      isExpansion: loc.isExpansion,
+      expansionSource: loc.city,
+    }, false);
+  }
+}
+
+/**
+ * EUA: empresas do Overture Maps (public/us), já sem site próprio. Vêm antes do mapa, como a Receita no Brasil.
+ * Ordem: confiança alta e ficha recente primeiro; dentro de cada faixa, misturado de um jeito fixo.
+ */
+async function collectFromOverture(ctx: MiningContext, queue: AsyncQueue<RawLead>, loc: SearchLocation, term: string, filter: UsNicheFilter): Promise<void> {
+  if (ctx.country !== 'us' || !loc.uf || !US_STATES.has(loc.uf) || loc.scope === 'region') return;
+  const companies = await loadUsCompanies(ctx.origin, loc.uf, loc.city, filter);
+  if (!companies) return;
+
+  const tierOf = (c: { confidence: number; updated: string }) =>
+    (c.confidence >= OVERTURE_SURE ? 0 : 2) + (c.updated && yearsSince(c.updated) <= OVERTURE_FRESH_YEARS ? 0 : 1);
+  const found = companies
+    .map((c) => ({ c, phones: cleanPhones(c.phones, 'us'), tier: tierOf(c), mix: mixKey(c.id) }))
+    .filter(({ phones }) => phones.length > 0)
+    .sort((a, b) => a.tier - b.tier || a.mix - b.mix || a.c.id.localeCompare(b.c.id));
+
+  for (const { c, phones } of found) {
+    if (ctx.isDone()) return;
+    acceptPlace(ctx, queue, loc, {
+      id: `overture/${c.id}`,
+      source: 'overture',
+      name: c.name,
+      category: term,
+      phone: phones[0],
+      otherPhones: phones.slice(1),
+      email: c.email || undefined,
+      website: c.social || undefined, // rede social/diretório: o site é conferido na validação
+      address: [c.street, `${loc.city}, ${loc.uf} ${c.zip}`.trim()].filter(Boolean).join(', '),
+      place: { cities: [loc.city], uf: loc.uf },
+      confidence: c.confidence,
+      listingUpdated: c.updated || undefined,
       rating: 0,
       reviewsCount: 0,
       reviewsKnown: false,
@@ -661,6 +742,7 @@ export async function GET(req: NextRequest) {
   const terms = expandSearchTerm(term, country);
   const typeTerms = placeTypeTerms(term).filter((t) => !terms.includes(t.toLowerCase()));
   const cnpjFilter = nicheFilter(term);
+  const usFilter = usNicheFilter(term);
   const locations = resolveLocations(rawCity, country);
 
   const encoder = new TextEncoder();
@@ -710,6 +792,7 @@ export async function GET(req: NextRequest) {
 
           try {
             await collectFromCnpj(ctx, queue, loc, terms[0], cnpjFilter);
+            await collectFromOverture(ctx, queue, loc, terms[0], usFilter);
             if (GOOGLE_API_KEY) await collectFromGoogle(ctx, queue, loc, terms);
             else await collectFromNominatim(ctx, queue, loc, terms, typeTerms);
           } finally {

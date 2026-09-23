@@ -395,15 +395,15 @@ export default function Home() {
 
   const t = uiTranslations[country] || uiTranslations["br"];
 
-  // Autocomplete de cidades: consulta só as sugestões que casam (antes baixava os 5.571 municípios do IBGE
-  // e montava 5.571 opções na tela, o que travava o celular).
+  // Autocomplete de cidades (Brasil e EUA): consulta só as sugestões que casam (antes baixava os 5.571 municípios
+  // do IBGE e montava 5.571 opções na tela, o que travava o celular).
   const cityQuery = city.split(" - ")[0].trim();
-  const canSuggest = country === "br" && cityQuery.length >= 2 && !city.includes(" - ");
+  const canSuggest = (country === "br" || country === "us") && cityQuery.length >= 2 && !city.includes(" - ");
   useEffect(() => {
     if (!canSuggest) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      fetch(`/api/cities?q=${encodeURIComponent(cityQuery)}`, { signal: controller.signal })
+      fetch(`/api/cities?q=${encodeURIComponent(cityQuery)}&country=${country}`, { signal: controller.signal })
         .then((res) => (res.ok ? res.json() : []))
         .then((list: string[]) => setCitySuggestions(Array.isArray(list) ? list : []))
         .catch(() => {});
@@ -412,7 +412,7 @@ export default function Home() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [canSuggest, cityQuery]);
+  }, [canSuggest, cityQuery, country]);
   const shownSuggestions = canSuggest ? citySuggestions : [];
 
   const showToast = useCallback((message: string) => {

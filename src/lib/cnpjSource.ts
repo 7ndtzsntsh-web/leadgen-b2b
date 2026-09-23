@@ -1,6 +1,7 @@
 import cnpjIndex from "../../public/cnpj/index.json";
 import { runPool } from "./async";
 import nicheCnaes from "./data/nicheCnaes.json";
+import { loadIndex, loadRows } from "./regionFiles";
 import { findDictionaryKey } from "./semanticDictionary";
 import { normalizeText } from "./text";
 
@@ -11,12 +12,6 @@ import { normalizeText } from "./text";
  */
 export const CNPJ_UFS = new Set(Object.keys(cnpjIndex.ufs));
 
-// Reserva: se o próprio site recusar a leitura (proteção anti-robô), lê do repositório público no GitHub.
-const RAW_BASE = "https://raw.githubusercontent.com/7ndtzsntsh-web/leadgen-b2b/main/public";
-const FETCH_TIMEOUT_MS = 10_000;
-// Limite do que fica em memória entre buscas, em empresas e não em arquivos: um ramo de São Paulo tem mais
-// empresas que uma cidade pequena inteira.
-const MAX_CACHED_COMPANIES = 60_000;
 const FILE_CONCURRENCY = 4;
 
 export interface CnpjCompany {
@@ -61,32 +56,7 @@ export function nicheFilter(term: string): NicheFilter {
 
 const citySlug = (city: string) => normalizeText(city).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-async function fetchJson(url: string): Promise<unknown | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: controller.signal, headers: { Accept: "application/json" } });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-const fetchData = async (origin: string, path: string) => (await fetchJson(`${origin}${path}`)) ?? (await fetchJson(`${RAW_BASE}${path}`));
-
 type Row = [string, string, string, string, string, string, string, string[], string, string?];
-
-interface CityFile {
-  linhas: Row[];
-}
-
-/** Por cidade: total de empresas (um arquivo) ou, na cidade dividida, empresas por ramo (um arquivo por CNAE). */
-interface UfIndex {
-  cidades: Record<string, number | Record<string, number>>;
-}
 
 const toCompany = ([cnpj, name, cnae, inicio, street, district, cep, phones, email, site]: Row): CnpjCompany => ({
   cnpj,
@@ -101,49 +71,8 @@ const toCompany = ([cnpj, name, cnae, inicio, street, district, cep, phones, ema
   site: site ?? "",
 });
 
-const ufIndexes = new Map<string, Promise<UfIndex | null>>();
-
-function loadUfIndex(origin: string, uf: string): Promise<UfIndex | null> {
-  const cached = ufIndexes.get(uf);
-  if (cached) return cached;
-  const pending = fetchData(origin, `/cnpj/${uf.toLowerCase()}/index.json`).then((data) => ((data as UfIndex | null)?.cidades ? (data as UfIndex) : null));
-  ufIndexes.set(uf, pending);
-  pending.then((index) => { if (!index) ufIndexes.delete(uf); }); // falha temporária: tenta de novo na próxima busca
-  return pending;
-}
-
-const files = new Map<string, Promise<CnpjCompany[] | null>>();
-const fileSizes = new Map<string, number>();
-let cachedCompanies = 0;
-
-/** Um arquivo de empresas, guardado em memória; os usados há mais tempo saem quando passa do limite. */
-function loadFile(origin: string, path: string): Promise<CnpjCompany[] | null> {
-  const cached = files.get(path);
-  if (cached) {
-    files.delete(path);
-    files.set(path, cached);
-    return cached;
-  }
-  const pending = fetchData(origin, path).then((data) => (data as CityFile | null)?.linhas?.map(toCompany) ?? null);
-  files.set(path, pending);
-  pending.then((companies) => {
-    if (!companies) {
-      files.delete(path);
-      return;
-    }
-    fileSizes.set(path, companies.length);
-    cachedCompanies += companies.length;
-    for (const [old] of files) {
-      if (cachedCompanies <= MAX_CACHED_COMPANIES) break;
-      const size = fileSizes.get(old);
-      if (size === undefined) continue; // ainda baixando
-      files.delete(old);
-      fileSizes.delete(old);
-      cachedCompanies -= size;
-    }
-  });
-  return pending;
-}
+const loadUfIndex = (origin: string, uf: string) => loadIndex(origin, `/cnpj/${uf.toLowerCase()}/index.json`);
+const loadFile = (origin: string, path: string) => loadRows(origin, path, toCompany);
 
 /** Empresas do nicho na cidade (null se a cidade não tem cadastro ou o arquivo não pôde ser lido). */
 export async function loadCompanies(origin: string, uf: string, city: string, filter: NicheFilter): Promise<CnpjCompany[] | null> {

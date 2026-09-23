@@ -20,8 +20,9 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        // Dados da Receita que a busca lê (public/cnpj): são só dados, e buscador não deve indexar telefone de empresa.
-        source: '/cnpj/:path*',
+        // Dados que a busca lê (Receita em public/cnpj, EUA em public/us): são só dados, e buscador não deve indexar
+        // telefone de empresa.
+        source: '/:dir(cnpj|us)/:path*',
         headers: [
           { key: 'Content-Security-Policy', value: "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" },
           { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
