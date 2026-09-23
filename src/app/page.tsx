@@ -15,7 +15,7 @@ import {
   type Lead,
 } from "@/lib/leadRules";
 import { semanticDictionary, uiTranslations } from "@/lib/semanticDictionary";
-import { buildPitch, pitchLangFor } from "@/lib/pitches";
+import { buildEmailBody, buildEmailSubject, buildPitch, pitchLangFor } from "@/lib/pitches";
 
 const DESKTOP_QUERY = "(min-width: 768px)";
 const FLUSH_INTERVAL_MS = 300;
@@ -84,28 +84,40 @@ const csvCell = (value: string | number | undefined): string => {
 
 interface LeadItemProps {
   lead: Lead;
+  /** País da busca que trouxe o lead (não o que está selecionado agora na tela). */
+  country: string;
   copied: boolean;
   onCopy: (lead: Lead) => void;
   onWhatsApp: (lead: Lead) => void;
+  onEmail: (lead: Lead) => void;
   onCall: (lead: Lead) => void;
 }
 
+/** Só endereço simples vira link mailto: (o e-mail vem de terceiros; "?" ou "&" poderiam mudar a mensagem). */
+const MAILTO_SAFE = /^[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
+
 /**
  * `wpp` abre no WhatsApp: o confirmado ou, se não houver, o celular (aí o botão diz "Testar", porque pode não ter
- * WhatsApp). `call` é o número para ligar. `numbers` são os telefones a exibir além do WhatsApp confirmado.
+ * WhatsApp). Nos EUA não há WhatsApp: no lugar dele vai o e-mail (`mail`). `call` é o número para ligar.
+ * `numbers` são os telefones a exibir além do WhatsApp confirmado.
  */
-function contactOf(lead: Lead) {
-  const wpp = whatsappOf(lead);
+function contactOf(lead: Lead, country: string) {
+  const byEmail = country === "us";
+  const wpp = byEmail ? undefined : whatsappOf(lead);
+  const mail = byEmail && MAILTO_SAFE.test(lead.email) ? lead.email : undefined;
   const call = callOf(lead);
   const numbers = [lead.phone, ...(lead.otherPhones ?? [])].filter(
     (n) => n !== NO_PHONE && !(lead.whatsapp && sameNumber(n, lead.whatsapp))
   );
-  return { wpp, wppConfirmed: !!lead.whatsapp, call, numbers };
+  return { wpp, wppConfirmed: !!lead.whatsapp, mail, call, numbers };
 }
 
-/** Tipo do número. Celular sem WhatsApp confirmado é "CEL", nunca "WPP": era isso que enganava. */
-function PhoneKind({ phone }: { phone: string }) {
-  const kind = getPhoneType(phone, "br");
+/**
+ * Tipo do número. Celular sem WhatsApp confirmado é "CEL", nunca "WPP": era isso que enganava. Nos EUA não dá para
+ * saber pelo número se é celular ou fixo: não mostra nada (antes lia como número do Brasil e dizia "FIXO").
+ */
+function PhoneKind({ phone, country }: { phone: string; country: string }) {
+  const kind = getPhoneType(phone, country);
   if (kind === "MOBILE") {
     return (
       <Badge variant="outline" title="Celular: WhatsApp não confirmado" className="bg-gray-500/10 text-gray-300 border-gray-500/30 text-[9px] mr-2 px-1">
@@ -191,8 +203,8 @@ function VerificationDetails({ lead }: { lead: Lead }) {
   );
 }
 
-const LeadCard = memo(function LeadCard({ lead, copied, onCopy, onWhatsApp, onCall }: LeadItemProps) {
-  const { wpp, wppConfirmed, call, numbers } = contactOf(lead);
+const LeadCard = memo(function LeadCard({ lead, country, copied, onCopy, onWhatsApp, onEmail, onCall }: LeadItemProps) {
+  const { wpp, wppConfirmed, mail, call, numbers } = contactOf(lead, country);
   return (
     <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-3 relative overflow-hidden">
       {lead.isExpansion && <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>}
@@ -208,7 +220,7 @@ const LeadCard = memo(function LeadCard({ lead, copied, onCopy, onWhatsApp, onCa
       <div className="flex flex-col gap-1 text-sm text-gray-300">
         {lead.whatsapp && <div className="flex items-center gap-2 text-[#25D366]"><MessageCircle className="w-3 h-3" /> {lead.whatsapp}</div>}
         {numbers.map((n) => (
-          <div key={n} className="flex items-center gap-2"><Phone className="w-3 h-3 text-muted-foreground" /> <span className="flex items-center"><PhoneKind phone={n} />{n}</span></div>
+          <div key={n} className="flex items-center gap-2"><Phone className="w-3 h-3 text-muted-foreground" /> <span className="flex items-center"><PhoneKind phone={n} country={country} />{n}</span></div>
         ))}
         {lead.email !== "N/D" && <div className="flex items-center gap-2"><Mail className="w-3 h-3 text-muted-foreground" /> <span className="truncate">{lead.email}</span></div>}
         <div className="flex items-center gap-2"><MapPin className="w-3 h-3 text-muted-foreground flex-shrink-0" /> <span className="truncate">{lead.address}</span></div>
@@ -236,8 +248,13 @@ const LeadCard = memo(function LeadCard({ lead, copied, onCopy, onWhatsApp, onCa
             <MessageCircle className="w-3 h-3 mr-1" /> {wppConfirmed ? "WPP" : "Testar WPP"}
           </Button>
         )}
+        {mail && (
+          <Button variant="default" className="bg-amber-500/20 text-amber-400 border-amber-500/50 text-xs h-11" onClick={() => onEmail(lead)}>
+            <Mail className="w-3 h-3 mr-1" /> E-mail
+          </Button>
+        )}
         {call && (
-          <Button variant="default" className={`bg-blue-600/20 text-blue-400 border-blue-500/50 text-xs h-11 ${wpp ? "col-span-2" : ""}`} onClick={() => onCall(lead)}>
+          <Button variant="default" className={`bg-blue-600/20 text-blue-400 border-blue-500/50 text-xs h-11 ${wpp || mail ? "col-span-2" : ""}`} onClick={() => onCall(lead)}>
             <Phone className="w-3 h-3 mr-1" /> Ligar
           </Button>
         )}
@@ -246,8 +263,8 @@ const LeadCard = memo(function LeadCard({ lead, copied, onCopy, onWhatsApp, onCa
   );
 });
 
-const LeadRow = memo(function LeadRow({ lead, copied, onCopy, onWhatsApp, onCall }: LeadItemProps) {
-  const { wpp, wppConfirmed, call, numbers } = contactOf(lead);
+const LeadRow = memo(function LeadRow({ lead, country, copied, onCopy, onWhatsApp, onEmail, onCall }: LeadItemProps) {
+  const { wpp, wppConfirmed, mail, call, numbers } = contactOf(lead, country);
   return (
     <TableRow className={`border-white/10 hover:bg-white/5 transition-colors group ${lead.isExpansion ? "bg-indigo-900/10" : ""}`}>
       <TableCell>
@@ -273,7 +290,7 @@ const LeadRow = memo(function LeadRow({ lead, copied, onCopy, onWhatsApp, onCall
           )}
           {numbers.map((n) => (
             <div key={n} className="text-sm font-mono text-white flex items-center">
-              <PhoneKind phone={n} />
+              <PhoneKind phone={n} country={country} />
               {n}
             </div>
           ))}
@@ -351,6 +368,16 @@ const LeadRow = memo(function LeadRow({ lead, copied, onCopy, onWhatsApp, onCall
               <MessageCircle className="w-3 h-3 ml-1" />
             </Button>
           )}
+          {mail && (
+            <Button
+              variant="default" size="sm"
+              className="bg-amber-500/20 text-amber-400 border border-amber-500/50 hover:bg-amber-500 hover:text-white transition-all text-[10px] h-7 w-24 flex justify-between"
+              onClick={() => onEmail(lead)}
+            >
+              E-mail
+              <Mail className="w-3 h-3 ml-1" />
+            </Button>
+          )}
           {call && (
             <Button
               variant="default" size="sm"
@@ -390,6 +417,8 @@ export default function Home() {
   const [city, setCity] = useState("");
   const [volume, setVolume] = useState("50");
   const [country, setCountry] = useState("br");
+  // País e cidade da última busca: os botões dos leads usam estes (trocar o país na tela depois não muda o DDI).
+  const [searched, setSearched] = useState({ country: "br", city: "" });
   const [noSite, setNoSite] = useState(false);
   const [insecure, setInsecure] = useState(false);
 
@@ -477,6 +506,7 @@ export default function Home() {
     setLeads([]);
     setLoading(true);
     setHasSearched(true);
+    setSearched({ country, city });
     setStatusMessage("Conectando...");
     if (!isDesktop) resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
@@ -523,10 +553,14 @@ export default function Home() {
     };
   };
 
+  // A cidade do ENDEREÇO do lead vem primeiro (a busca pode devolver empresas de cidades vizinhas).
+  const cityOf = useCallback(
+    (lead: Lead) => lead.city || lead.expansionSource || searched.city.split(" - ")[0].trim() || (searched.country === "us" ? "your area" : "sua região"),
+    [searched]
+  );
   const pitchFor = useCallback(
-    // A cidade do ENDEREÇO do lead vem primeiro (a busca pode devolver empresas de cidades vizinhas).
-    (lead: Lead) => buildPitch(lead, pitchLangFor(country), lead.city || lead.expansionSource || city.split(" - ")[0].trim() || "sua região"),
-    [country, city]
+    (lead: Lead) => buildPitch(lead, pitchLangFor(searched.country), cityOf(lead)),
+    [searched, cityOf]
   );
 
   const handleCopyMessage = useCallback(async (lead: Lead) => {
@@ -547,16 +581,26 @@ export default function Home() {
   };
 
   const handleOpenWhatsApp = useCallback((lead: Lead) => {
-    const number = whatsappOf(lead);
+    const number = contactOf(lead, searched.country).wpp;
     if (!number) return;
-    window.open(`https://wa.me/${internationalNumber(number, country)}?text=${encodeURIComponent(pitchFor(lead))}`, "_blank", "noopener,noreferrer");
-  }, [country, pitchFor]);
+    window.open(`https://wa.me/${internationalNumber(number, searched.country)}?text=${encodeURIComponent(pitchFor(lead))}`, "_blank", "noopener,noreferrer");
+  }, [searched, pitchFor]);
+
+  // Abre o app de e-mail já com assunto e texto (nos EUA, no lugar do WhatsApp).
+  const handleEmail = useCallback((lead: Lead) => {
+    const address = contactOf(lead, searched.country).mail;
+    if (!address) return;
+    const lang = pitchLangFor(searched.country);
+    const subject = encodeURIComponent(buildEmailSubject(lead, lang));
+    const body = encodeURIComponent(buildEmailBody(lead, lang, cityOf(lead)));
+    window.open(`mailto:${address}?subject=${subject}&body=${body}`, "_self");
+  }, [searched, cityOf]);
 
   const handleCall = useCallback((lead: Lead) => {
-    const number = callOf(lead);
+    const number = contactOf(lead, searched.country).call;
     if (!number) return;
-    window.open(`tel:+${internationalNumber(number, country)}`, "_self");
-  }, [country]);
+    window.open(`tel:+${internationalNumber(number, searched.country)}`, "_self");
+  }, [searched]);
 
   const handleExportCSV = () => {
     if (leads.length === 0) return;
@@ -795,7 +839,7 @@ export default function Home() {
                       <div className="text-center py-12 text-muted-foreground font-mono text-sm">Nenhuma oportunidade encontrada.</div>
                     ) : (
                       leads.map((lead) => (
-                        <LeadCard key={lead.id} lead={lead} copied={copiedId === lead.id} onCopy={handleCopyMessage} onWhatsApp={handleOpenWhatsApp} onCall={handleCall} />
+                        <LeadCard key={lead.id} lead={lead} country={searched.country} copied={copiedId === lead.id} onCopy={handleCopyMessage} onWhatsApp={handleOpenWhatsApp} onEmail={handleEmail} onCall={handleCall} />
                       ))
                     )}
                   </div>
@@ -824,7 +868,7 @@ export default function Home() {
                             </TableRow>
                           ) : (
                             leads.map((lead) => (
-                              <LeadRow key={lead.id} lead={lead} copied={copiedId === lead.id} onCopy={handleCopyMessage} onWhatsApp={handleOpenWhatsApp} onCall={handleCall} />
+                              <LeadRow key={lead.id} lead={lead} country={searched.country} copied={copiedId === lead.id} onCopy={handleCopyMessage} onWhatsApp={handleOpenWhatsApp} onEmail={handleEmail} onCall={handleCall} />
                             ))
                           )}
                         </TableBody>

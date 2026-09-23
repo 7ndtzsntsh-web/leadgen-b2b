@@ -71,3 +71,42 @@ export function buildPitch(lead: PitchLead, lang: PitchLang, city: string): stri
   };
   return texts[reason];
 }
+
+/**
+ * Assunto do e-mail de abordagem (nos EUA não há WhatsApp: a mensagem vai por e-mail). Curto e com o nome da
+ * empresa, como um e-mail escrito por gente, e dizendo o problema real do lead.
+ */
+export function buildEmailSubject(lead: Pick<PitchLead, "name" | "siteStatus">, lang: PitchLang): string {
+  const { name } = lead;
+  const subjects: Record<PitchLang, Record<Reason, string>> = {
+    en: {
+      noSite: `A website for ${name}`,
+      socialOnly: `A website of your own for ${name}`,
+      down: `${name}'s website isn't loading`,
+      insecure: `${name}'s website shows "Not Secure"`,
+      ok: `An idea for ${name}'s website`,
+    },
+    es: {
+      noSite: `Un sitio web para ${name}`,
+      socialOnly: `Un sitio web propio para ${name}`,
+      down: `El sitio web de ${name} no abre`,
+      insecure: `El sitio web de ${name} aparece como "No seguro"`,
+      ok: `Una idea para el sitio web de ${name}`,
+    },
+    pt: {
+      noSite: `Um site para a ${name}`,
+      socialOnly: `Um site próprio para a ${name}`,
+      down: `O site da ${name} não está abrindo`,
+      insecure: `O site da ${name} aparece como "Não seguro"`,
+      ok: `Uma ideia para o site da ${name}`,
+    },
+  };
+  return subjects[lang][reasonFor(lead.siteStatus)];
+}
+
+const SIGN_OFF: Record<PitchLang, string> = { en: "Best regards,", es: "Saludos,", pt: "Abraço," };
+
+/** Corpo do e-mail: o mesmo texto de abordagem, com a despedida de e-mail (a assinatura fica por conta do app). */
+export function buildEmailBody(lead: PitchLead, lang: PitchLang, city: string): string {
+  return `${buildPitch(lead, lang, city)}\n\n${SIGN_OFF[lang]}`;
+}

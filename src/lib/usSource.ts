@@ -3,6 +3,7 @@ import { runPool } from "./async";
 import nicheOverture from "./data/nicheOverture.json";
 import { loadIndex, loadRows } from "./regionFiles";
 import { findDictionaryKey } from "./semanticDictionary";
+import { usCityKey } from "./usCities";
 import { normalizeText } from "./text";
 
 /**
@@ -61,7 +62,7 @@ export function usNicheFilter(term: string): UsNicheFilter {
   return { nameParts: [singular, singular.replace(/\s+/g, "_")] };
 }
 
-const citySlug = (city: string) => normalizeText(city).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const citySlug = (city: string) => usCityKey(city).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const loadStateIndex = (origin: string, state: string) => loadIndex(origin, `/us/${state.toLowerCase()}/index.json`);
 const loadFile = (origin: string, path: string) => loadRows(origin, path, toCompany);
 
