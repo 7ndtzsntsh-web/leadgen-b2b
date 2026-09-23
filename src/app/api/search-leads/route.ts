@@ -12,7 +12,7 @@ import { normalizeText } from '@/lib/text';
 import { areaKey, checkAddress, type AddressCheck, type SearchedArea, type StructuredAddress } from '@/lib/address';
 import { checkEmailDomain } from '@/lib/emailCheck';
 import { candidateDomains, findOwnWebsite, siteFromEmail } from '@/lib/siteFinder';
-import { CNPJ_UFS, companiesFor, loadCity, nicheFilter, type NicheFilter } from '@/lib/cnpjSource';
+import { CNPJ_UFS, loadCompanies, nicheFilter, type NicheFilter } from '@/lib/cnpjSource';
 import { UF_NAMES } from '@/lib/ufData';
 import { buildChecks, isOwnSiteLive, isVerified, yearsSince, type PhoneOrigin, type WhatsAppOrigin } from '@/lib/verification';
 import {
@@ -585,12 +585,13 @@ async function collectFromNominatim(
  */
 async function collectFromCnpj(ctx: MiningContext, queue: AsyncQueue<RawLead>, loc: SearchLocation, term: string, filter: NicheFilter): Promise<void> {
   if (ctx.country !== 'br' || !loc.uf || !CNPJ_UFS.has(loc.uf) || loc.scope === 'region') return;
-  const all = await loadCity(ctx.origin, loc.uf, loc.city);
-  if (!all) return;
+  const companies = await loadCompanies(ctx.origin, loc.uf, loc.city, filter);
+  if (!companies) return;
 
-  const found = companiesFor(all, filter).map((c) => ({ c, phones: cleanPhones(c.phones, ctx.country, loc.uf) }));
+  const found = companies.map((c) => ({ c, phones: cleanPhones(c.phones, ctx.country, loc.uf) }));
   const hasMobile = (phones: string[]) => phones.some((p) => getPhoneType(p, ctx.country) === 'MOBILE');
-  found.sort((a, b) => Number(hasMobile(b.phones)) - Number(hasMobile(a.phones)) || b.c.openedOn.localeCompare(a.c.openedOn));
+  found.sort((a, b) =>
+    Number(hasMobile(b.phones)) - Number(hasMobile(a.phones)) || b.c.openedOn.localeCompare(a.c.openedOn) || a.c.cnpj.localeCompare(b.c.cnpj));
 
   for (const { c, phones } of found) {
     if (ctx.isDone()) return;

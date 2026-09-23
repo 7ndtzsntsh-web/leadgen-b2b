@@ -9,7 +9,7 @@
     "lint": "eslint",
     "security:scan": "node scripts/observatory-local.mjs",
     "cnpj:baixar": "node scripts/cnpj/download.mjs",
-    "cnpj:gerar": "node scripts/cnpj/build.mjs",
+    "cnpj:gerar": "node --max-old-space-size=6144 scripts/cnpj/build.mjs",
     "cnpj:mapa": "node scripts/cnpj/osm.mjs"
   },
   "dependencies": {

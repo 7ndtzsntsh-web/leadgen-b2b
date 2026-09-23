@@ -53,25 +53,31 @@ node_modules/.bin/jiti arquivo.ts                   # teste de lógica (não há
 - Checagem `info: true` (ex.: WhatsApp de celular, que não dá para confirmar de graça) aparece em cinza e não
   derruba o selo VERIFICADO. Não usar `info` para esconder o que DÁ para checar.
 
-## Cadastro de CNPJ da Receita Federal (fonte principal em SC)
+## Cadastro de CNPJ da Receita Federal (fonte principal nos estados que têm os dados)
 
-- Dados abertos da Receita, processados em `public/cnpj/<uf>/<cidade>.json` (hoje só SC; `CNPJ_UFS` em
-  `src/lib/cnpjSource.ts`). Na busca, vêm ANTES do mapa; o mesmo negócio no mapa é repetição e fica de fora.
+- Dados abertos da Receita em `public/cnpj` (formato em `scripts/cnpj/output.mjs`). Estados ativos: os de
+  `public/cnpj/index.json`. Cidade com até 6.000 empresas é um arquivo (`<uf>/<cidade>.json`); maior vira uma pasta
+  com um arquivo por ramo (`<uf>/<cidade>/<cnae>.json`), para a busca baixar só o ramo pedido (São Paulo inteira
+  seria dezenas de MB a cada busca). `<uf>/index.json` diz o que existe. Na busca, vêm ANTES do mapa; o mesmo
+  negócio no mapa é repetição e fica de fora.
 - Entram só: CNPJ ATIVO, dos nichos de `src/lib/data/nicheCnaes.json` (códigos conferidos na tabela oficial),
   com nome fantasia, com telefone/e-mail próprio. Telefone ou e-mail usado por 3+ empresas = contador: sai.
   Sócios não são baixados.
-- Atualizar todo mês (a Receita publica mensalmente; ~5,4 GB, uns 25 min + 2 min de processamento):
+- Atualizar todo mês (a Receita publica mensalmente; ~5,4 GB, uns 25 min de download). O arquivo da Receita já é
+  do Brasil todo; sem UF, os comandos fazem os 27 estados (ou só os indicados: `-- SC PR`):
   ```bash
-  npm run cnpj:baixar             # baixa o mês mais recente para .cache/ (fora do git)
-  npm run cnpj:mapa -- SC         # sites/redes do OpenStreetMap (~25 s) para juntar às empresas
-  npm run cnpj:gerar -- AAAA-MM SC
+  npm run cnpj:baixar                # baixa o mês mais recente para .cache/ (fora do git)
+  npm run cnpj:mapa                  # sites/redes do OpenStreetMap; estado que falhar: rodar de novo
+  npm run cnpj:gerar -- AAAA-MM      # separa por estado e processa um de cada vez (até ~2 GB de memória)
   ```
+- Nome de cidade diferente na Receita e no IBGE ("MOJI MIRIM", nome antigo): o gerador casa sozinho quando dá e
+  lista no fim os que não casou. Esses vão em `CITY_ALIASES` (`scripts/cnpj/build.mjs`), senão a busca não acha.
 - A Receita não tem site: o `cnpj:mapa` junta o site/rede do mapa pelo telefone (ou nome único). Sem ele,
   empresa com site aparece "sem site" (eram 90 casos só em Florianópolis).
 - Site pelo e-mail da empresa (`siteFromEmail`): no ar, basta UMA palavra do nome ou o telefone; quebrado ou
   estacionado vira "fora do ar" só se o domínio tiver uma palavra do nome (e-mail de contador não conta).
 - Mesmo nome fantasia com outro CNPJ (matriz/filial) aparece uma vez só.
-  Depois: conferir o resumo (empresas, cidades, tamanho), testar uma busca e publicar por PR.
+  Depois: conferir o resumo (empresas, cidades, tamanho, cidades sem par), testar uma busca e publicar por PR.
 - Telefone da Receita conta como confirmado se a empresa tem até 6 anos; mais antiga aparece com aviso.
   "CNPJ ativo" confirma que a empresa existe no papel (pode estar parada: por isso o texto diz "CNPJ ativo").
 - Nicho novo: acrescentar em `nicheCnaes.json` conferindo o código na tabela `Cnaes.zip` e rodar o gerar.
