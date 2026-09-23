@@ -116,6 +116,42 @@ for (const i of FILE_NUMBERS) {
   console.log(`Estabelecimentos${i}: ${rows} ativas em ${UFS.join(",")} | ${candidates.length} dos nichos até agora | ${((Date.now() - t0) / 1000).toFixed(0)}s`);
 }
 
+// Sites e redes sociais do OpenStreetMap (scripts/cnpj/osm.mjs): a Receita não tem site. Liga pelo telefone ou,
+// quando o nome é único nas duas fontes, pelo nome.
+const nameKey = (s) => norm(s).replace(/[^a-z0-9]/g, "");
+const osmPhoneKey = (raw) => {
+  let d = raw.replace(/\D/g, "");
+  if (d.startsWith("55") && d.length >= 12) d = d.slice(2);
+  if (d.startsWith("0")) d = d.slice(1);
+  return d.length >= 10 ? d.slice(0, 2) + d.slice(-8) : null;
+};
+const osmByPhone = new Map();
+const osmByName = new Map();
+for (const uf of UFS) {
+  const file = join(".cache", "osm", `${uf.toLowerCase()}-sites.json`);
+  if (!existsSync(file)) {
+    console.log(`AVISO: sem ${file} (rode scripts/cnpj/osm.mjs ${uf}): as empresas ficam sem o site que o mapa tem.`);
+    continue;
+  }
+  for (const [name, phones, website, social] of JSON.parse(readFileSync(file, "utf8")).lugares) {
+    const site = website || social;
+    if (!site) continue;
+    for (const p of phones) {
+      const k = osmPhoneKey(p);
+      if (k) osmByPhone.set(k, site);
+    }
+    const k = nameKey(name);
+    osmByName.set(k, osmByName.has(k) ? null : site); // nome repetido no mapa: não dá para saber qual é
+  }
+}
+const cnpjNameCount = new Map();
+for (const { c } of candidates) {
+  const k = nameKey(c[C.fantasia]);
+  cnpjNameCount.set(k, (cnpjNameCount.get(k) ?? 0) + 1);
+}
+let sitePeloTelefone = 0;
+let sitePeloNome = 0;
+
 const byCity = new Map();
 let semContato = 0;
 let telefonesDeContador = 0;
@@ -137,6 +173,16 @@ for (const { c, phones, email } of candidates) {
     semContato++;
     continue;
   }
+  let site = "";
+  for (const p of okPhones) {
+    site = osmByPhone.get(phoneKey(p)) ?? "";
+    if (site) break;
+  }
+  if (site) sitePeloTelefone++;
+  else if (cnpjNameCount.get(nameKey(c[C.fantasia])) === 1 && osmByName.get(nameKey(c[C.fantasia]))) {
+    site = osmByName.get(nameKey(c[C.fantasia]));
+    sitePeloNome++;
+  }
   const street = [c[C.tipoLogradouro], c[C.logradouro]].map((s) => s.trim()).filter(Boolean).join(" ");
   const address = [titleCase(street), c[C.numero].trim(), titleCase(c[C.complemento])].filter(Boolean).join(", ");
   const row = [
@@ -149,6 +195,7 @@ for (const { c, phones, email } of candidates) {
     c[C.cep],
     okPhones,
     okEmail,
+    site,
   ];
   if (!byCity.has(key)) byCity.set(key, { uf: c[C.uf], city: titleCase(city), rows: [] });
   byCity.get(key).rows.push(row);
@@ -165,7 +212,7 @@ for (const [key, { uf, city, rows }] of byCity) {
     mes: month,
     cidade: city,
     uf,
-    campos: ["cnpj", "nome", "cnae", "inicio", "endereco", "bairro", "cep", "telefones", "email"],
+    campos: ["cnpj", "nome", "cnae", "inicio", "endereco", "bairro", "cep", "telefones", "email", "site"],
     linhas: rows,
   });
   writeFileSync(join(dir, `${key.split("/")[1]}.json`), body);
@@ -178,4 +225,5 @@ writeFileSync(join(OUT, "index.json"), JSON.stringify(index, null, 1));
 console.log(`\nAtivas em ${UFS.join(",")}: ${ativasNaUf}`);
 console.log(`Dos nichos, com nome fantasia: ${candidates.length} | sem contato próprio (descartadas): ${semContato}`);
 console.log(`Telefones descartados por serem de contador/escritório (3+ empresas): ${telefonesDeContador}`);
+console.log(`Site/rede social vindo do mapa: ${sitePeloTelefone} pelo telefone, ${sitePeloNome} pelo nome`);
 console.log(`Gravadas: ${total} empresas em ${byCity.size} cidades, ${(bytes / 1e6).toFixed(1)} MB`);

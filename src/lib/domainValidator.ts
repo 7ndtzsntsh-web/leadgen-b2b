@@ -27,6 +27,9 @@ const SOCIAL_HOSTS = [
   "tripadvisor.com", "tripadvisor.com.br", "guiamais.com.br", "apontador.com.br", "telelistas.net",
   "solutudo.com.br", "yelp.com", "foursquare.com", "rappi.com.br", "mercadolivre.com.br", "olx.com.br",
   "doctoralia.com.br", "booking.com", "airbnb.com.br", "business.google.com", "maps.google.com",
+  // Plataformas de academia, cardápio e delivery: a página é da plataforma ("Sharks Gym" apontava para o TotalPass).
+  "totalpass.com", "wellhub.com", "gympass.com", "goomer.app", "anota.ai", "menudino.com", "cardapioweb.com",
+  "aiqfome.com", "ubereats.com", "deliverymuch.com.br", "linktree.com.br",
 ];
 
 // Páginas padrão de servidor / domínio estacionado / conta suspensa: existem, mas não são um site.
@@ -34,7 +37,7 @@ const PARKED_MARKERS = [
   "account suspended", "conta suspensa", "this domain is for sale", "domain is for sale", "domínio à venda",
   "dominio a venda", "sedoparking", "parkingcrew", "default web site page", "welcome to nginx",
   "apache2 ubuntu default page", "index of /", "site em construção", "página em construção",
-  "under construction",
+  "under construction", "parked domain", "domain parking", "domínio estacionado", "dominio estacionado",
 ];
 
 const JUNK_EMAIL_DOMAINS = [
@@ -280,9 +283,17 @@ export async function probe(url: string): Promise<Probe | null> {
   }
 }
 
-/** Página padrão de servidor, domínio à venda ou conta suspensa: o endereço existe, mas não é um site. */
+// No título, valem para página de qualquer tamanho (a de domínio estacionado da Hostinger tem 32 KB).
+const PARKED_TITLE_MARKERS = [
+  "parked domain", "domain parking", "domínio estacionado", "dominio estacionado", "this domain is for sale",
+  "domain for sale", "account suspended", "conta suspensa", "coming soon", "em breve", "site em construção",
+];
+
+/** Página padrão de servidor, domínio estacionado/à venda ou conta suspensa: o endereço existe, mas não é um site. */
 export function isParkedPage(html: string): boolean {
-  if (html.length >= 30_000) return false;
+  const title = (html.match(/<title[^>]*>([^<]{0,200})/i)?.[1] ?? "").toLowerCase();
+  if (PARKED_TITLE_MARKERS.some((marker) => title.includes(marker))) return true;
+  if (html.length >= 60_000) return false;
   const lower = html.toLowerCase();
   return PARKED_MARKERS.some((marker) => lower.includes(marker));
 }

@@ -31,8 +31,10 @@ export interface VerificationInput {
   /** Situação do domínio do e-mail; ausente se o lead não tem e-mail. `invalid` nunca chega aqui (o e-mail é descartado). */
   email?: "ok" | "unknown";
   siteStatus: SiteStatus;
-  /** Site achado pelo nome da empresa (não estava no cadastro). */
+  /** Site achado pela busca (não estava no cadastro). */
   siteFound?: string;
+  /** Como foi achado: pelo domínio do e-mail da empresa ou pelo nome. */
+  siteFoundVia?: "email" | "nome";
   /** Endereços testados sem sucesso na busca pelo nome; ausente quando a busca não foi feita. */
   siteSearched?: string[];
   /** A fonte informou que a empresa está em funcionamento (status do Google = OPERATIONAL). */
@@ -118,12 +120,18 @@ function activityCheck(input: VerificationInput, now: Date): LeadCheck {
 function siteDetail(input: VerificationInput): string {
   if (input.siteFound) {
     const host = input.siteFound.replace(/^https?:\/\//, "");
+    if (input.siteFoundVia === "email") {
+      return input.siteStatus === "Erro 404/Inativo"
+        ? `A empresa tem o domínio ${host} (é o do e-mail dela), mas o site não abre ou está só estacionado`
+        : `Site do domínio do e-mail da empresa: ${host}. ${SITE_DETAIL[input.siteStatus]}`;
+    }
     return `Site achado pelo nome: ${host} (mostra o nome e o telefone ou a cidade da empresa). ${SITE_DETAIL[input.siteStatus]}`;
   }
   if (input.siteStatus === "Sem Site" && input.siteSearched) {
     const n = input.siteSearched.length;
     if (n === 0) return "Nenhum site no cadastro (nome genérico demais para procurar pelo endereço)";
-    return `Nenhum site no cadastro, e ${input.siteSearched.join(" e ")} ${n > 1 ? "não existem ou são" : "não existe ou é"} de outra empresa`;
+    const tried = n > 2 ? `${input.siteSearched.slice(0, 2).join(", ")} e mais ${n - 2} endereços` : input.siteSearched.join(" e ");
+    return `Nenhum site no cadastro, e ${tried} ${n > 1 ? "não existem ou são" : "não existe ou é"} de outra empresa`;
   }
   return SITE_DETAIL[input.siteStatus];
 }

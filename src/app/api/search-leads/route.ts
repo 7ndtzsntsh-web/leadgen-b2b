@@ -156,9 +156,12 @@ function acceptPlace(ctx: MiningContext, queue: AsyncQueue<RawLead>, loc: Search
   if (closed || raw.name === 'Desconhecido') return true; // fechado, ou cadastro sem nome (não dá para abordar)
 
   const nameKey = normalizeText(raw.name).split(/\s[-–|]\s/)[0].replace(/[^a-z0-9]/g, '');
-  // A Receita vem primeiro e é a fonte mais completa: o mesmo negócio achado depois no mapa é repetição.
-  if (raw.source === 'cnpj') ctx.knownNames.add(nameKey);
-  else if (ctx.knownNames.has(nameKey)) return true;
+  // A Receita vem primeiro e é a fonte mais completa: o mesmo negócio achado depois no mapa é repetição, e o
+  // mesmo nome com outro CNPJ (matriz e filial) também — apareciam duas "Cia Sucos".
+  // Por cidade: "Padaria Pão Quente" em Florianópolis e em São José são empresas diferentes.
+  const cityNameKey = `${normalizeText(loc.city)}|${nameKey}`;
+  if (ctx.knownNames.has(cityNameKey)) return true;
+  if (raw.source === 'cnpj') ctx.knownNames.add(cityNameKey);
   const occurrences = (ctx.nameCounts.get(nameKey) ?? 0) + 1;
   ctx.nameCounts.set(nameKey, occurrences);
   if (nameKey.length > 3 && occurrences > 2) return true;
@@ -204,14 +207,17 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
   // Sem site no cadastro: procura pelo nome (padariaxyz.com.br), aceitando só o que for comprovadamente da empresa.
   let website = raw.website;
   let siteFound: string | undefined;
+  let siteFoundVia: 'email' | 'nome' | undefined;
   let siteSearched: string[] | undefined;
   if (!website && raw.source !== 'google') {
     const city = addressCheck && 'city' in addressCheck && addressCheck.city ? addressCheck.city : raw.expansionSource;
     const clues = { phones: listedPhones, city, country: ctx.country };
     // Primeiro o domínio do e-mail da empresa (contato@padariaxyz.com.br), depois o nome.
-    siteFound = (raw.email ? await siteFromEmail(raw.email, raw.name, clues) : undefined) ?? (await findOwnWebsite(raw.name, clues));
+    const fromEmail = raw.email ? await siteFromEmail(raw.email, raw.name, clues) : undefined;
+    siteFound = fromEmail ?? (await findOwnWebsite(raw.name, clues));
+    siteFoundVia = fromEmail ? 'email' : 'nome';
     website = siteFound;
-    if (!siteFound) siteSearched = candidateDomains(raw.name, ctx.country).hosts;
+    if (!siteFound) siteSearched = candidateDomains(raw.name, ctx.country).candidates.map((c) => c.host);
   }
 
   let siteStatus: SiteStatus = 'Sem Site';
@@ -282,6 +288,7 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
     email: emailDomain,
     siteStatus,
     siteFound,
+    siteFoundVia,
     siteSearched,
     activeConfirmed: raw.activeConfirmed,
     cnpjActive: raw.source === 'cnpj',
@@ -597,6 +604,7 @@ async function collectFromCnpj(ctx: MiningContext, queue: AsyncQueue<RawLead>, l
       phone,
       otherPhones: phones.filter((p) => p !== phone),
       email: c.email || undefined,
+      website: c.site || undefined, // site/rede social que o mapa tem (juntado na importação)
       cnpj: c.cnpj,
       openedOn: c.openedOn,
       address: [c.street, c.district].filter(Boolean).join(' - ') + `, ${loc.city} - ${loc.uf}, ${cep}`,

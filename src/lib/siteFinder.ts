@@ -37,29 +37,47 @@ export interface SiteClues {
   country: string;
 }
 
-export interface DomainCandidates {
-  hosts: string[];
-  /** Palavras que identificam a empresa e precisam aparecer na página. */
-  distinctive: string[];
-  /** O endereço é o nome completo de mais de uma palavra ("pizzariabasilico"): específico o bastante para aceitar a cidade. */
+export interface DomainCandidate {
+  host: string;
+  /** Endereço de mais de uma palavra ("pizzariabasilico"): específico o bastante para aceitar nome + cidade. */
   composite: boolean;
 }
 
-/** Endereços prováveis a partir do nome e as palavras que identificam a empresa. */
-export function candidateDomains(name: string, country: string): DomainCandidates {
-  const words = normalizeText(name).replace(/['’`´]/g, "").replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean);
-  const distinctive = words.filter((w) => w.length >= 3 && !GENERIC.has(w));
-  const slug = words.join("");
-  const composite = words.length >= 2;
-  if (distinctive.length === 0 || slug.length < 6 || slug.length > 40) return { hosts: [], distinctive, composite };
-  return { hosts: (TLDS[country] ?? [".com"]).map((tld) => `${slug}${tld}`), distinctive, composite };
+export interface DomainCandidates {
+  candidates: DomainCandidate[];
+  /** Palavras que identificam a empresa: TODAS precisam aparecer na página. */
+  distinctive: string[];
 }
 
 /**
- * A página é mesmo desta empresa: nome (palavras inteiras) + telefone; ou nome + cidade quando o endereço é o
- * nome completo de mais de uma palavra. Nome de uma palavra só ("milano.com") precisa do telefone.
+ * Endereços prováveis a partir do nome. Além do nome inteiro, só as palavras que identificam a empresa
+ * ("Taberna Iberica Restaurante" -> tabernaiberica), o começo do nome e a versão com hífen: nomes longos
+ * ("Trigales Padaria, Confeitaria e Cafeteria") quase nunca viram o endereço inteiro.
  */
-export function pageBelongsTo(html: string, { distinctive, composite }: Omit<DomainCandidates, "hosts">, clues: SiteClues): boolean {
+export function candidateDomains(name: string, country: string): DomainCandidates {
+  const words = normalizeText(name).replace(/['’`´]/g, "").replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean);
+  const distinctive = words.filter((w) => w.length >= 3 && !GENERIC.has(w));
+  if (distinctive.length === 0) return { candidates: [], distinctive };
+
+  const slugs: { slug: string; composite: boolean }[] = [];
+  const add = (parts: string[], separator = "") => {
+    const slug = parts.join(separator);
+    if (slug.length >= 6 && slug.length <= 40 && !slugs.some((s) => s.slug === slug)) slugs.push({ slug, composite: parts.length >= 2 });
+  };
+  add(words);
+  add(distinctive);
+  if (words.length >= 3) add(words.slice(0, 2));
+  if (words.length >= 2) add(words, "-");
+
+  const tlds = TLDS[country] ?? [".com"];
+  return { candidates: slugs.flatMap(({ slug, composite }) => tlds.map((tld) => ({ host: `${slug}${tld}`, composite }))), distinctive };
+}
+
+/**
+ * A página é mesmo desta empresa: todas as palavras do nome (inteiras) + telefone; ou + cidade quando o endereço
+ * tem mais de uma palavra. Endereço de uma palavra só ("milano.com") precisa do telefone.
+ */
+export function pageBelongsTo(html: string, { distinctive, composite }: { distinctive: string[]; composite: boolean }, clues: SiteClues): boolean {
   const text = ` ${normalizeText(html.replace(/<[^>]*>/g, " ")).replace(/[^a-z0-9]+/g, " ")} `;
   if (!distinctive.every((w) => text.includes(` ${w} `))) return false;
 
@@ -100,14 +118,17 @@ async function resolves(host: string): Promise<boolean> {
 }
 
 async function search(name: string, clues: SiteClues): Promise<string | undefined> {
-  const { hosts, ...identity } = candidateDomains(name, clues.country);
-  for (const host of hosts) {
-    if (!isPublicHost(host) || !(await resolves(host))) continue;
+  const { candidates, distinctive } = candidateDomains(name, clues.country);
+  // DNS de todos ao mesmo tempo: a maioria dos endereços nem existe, e só os que existem são abertos.
+  const existing = await Promise.all(candidates.map(async (c) => (isPublicHost(c.host) && (await resolves(c.host)) ? c : null)));
+  for (const candidate of existing) {
+    if (!candidate) continue;
+    const { host, composite } = candidate;
     const page = (await probe(`https://${host}`)) ?? (await probe(`http://${host}`));
     if (!page || page.status >= 400 || !page.html) continue;
     const finalHost = getHostname(page.finalUrl);
     if (!finalHost || isSocialHost(finalHost) || isParkedPage(page.html)) continue;
-    if (pageBelongsTo(page.html, identity, clues)) return page.finalUrl.startsWith("https://") ? `https://${host}` : `http://${host}`;
+    if (pageBelongsTo(page.html, { distinctive, composite }, clues)) return page.finalUrl.startsWith("https://") ? `https://${host}` : `http://${host}`;
   }
   return undefined;
 }
@@ -120,29 +141,37 @@ const FREE_MAIL = new Set([
 ]);
 
 /**
- * Site pelo domínio do e-mail da empresa (contato@padariaxyz.com.br -> padariaxyz.com.br). O domínio já é da
- * empresa, então basta a página mostrar o nome dela ou o telefone.
+ * Site pelo domínio do e-mail da empresa (contato@padariaxyz.com.br -> padariaxyz.com.br).
+ * - Site no ar: o domínio já é da empresa, então basta a página ter UMA palavra do nome (o site da "Blessy Gelatos e
+ *   Doces" se chama "Blessy Benditas Delícias") ou o telefone.
+ * - Site quebrado ou domínio estacionado: devolve o endereço mesmo assim (vira "fora do ar", ótimo argumento de
+ *   venda), mas só se o próprio domínio tiver uma palavra do nome — "caroline@ducont.com.br" é do contador.
  */
 export async function siteFromEmail(email: string, name: string, clues: SiteClues): Promise<string | undefined> {
   const domain = email.split("@")[1]?.toLowerCase().replace(/\.$/, "");
   if (!domain || FREE_MAIL.has(domain) || !isPublicHost(domain)) return undefined;
-  const { distinctive } = candidateDomains(name, clues.country);
+  const words = candidateDomains(name, clues.country).distinctive.filter((w) => w.length >= 4);
+  const domainIsTheirs = words.some((w) => domain.replace(/[^a-z0-9]/g, "").includes(w));
+
+  let resolved = false;
   for (const host of [domain, `www.${domain}`]) {
     if (!(await resolves(host))) continue;
+    resolved = true;
     const page = (await probe(`https://${host}`)) ?? (await probe(`http://${host}`));
     if (!page || page.status >= 400 || !page.html) continue;
     const finalHost = getHostname(page.finalUrl);
     if (!finalHost || isSocialHost(finalHost) || isParkedPage(page.html)) continue;
     const text = ` ${normalizeText(page.html.replace(/<[^>]*>/g, " ")).replace(/[^a-z0-9]+/g, " ")} `;
-    const nameHit = distinctive.length > 0 && distinctive.every((w) => text.includes(` ${w} `));
+    const nameHit = words.some((w) => text.includes(` ${w} `));
     const digits = page.html.replace(/\D/g, "");
     const phoneHit = clues.phones.some((p) => {
       const tail = p.replace(/\D/g, "").slice(-8);
       return tail.length === 8 && digits.includes(tail);
     });
     if (nameHit || phoneHit) return page.finalUrl.startsWith("https://") ? `https://${host}` : `http://${host}`;
+    return undefined; // site no ar, mas de outra empresa
   }
-  return undefined;
+  return resolved && domainIsTheirs ? `https://${domain}` : undefined;
 }
 
 /** Site próprio da empresa, ou undefined se não houver um que dê para confirmar. */

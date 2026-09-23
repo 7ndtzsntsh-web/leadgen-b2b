@@ -63,8 +63,14 @@ node_modules/.bin/jiti arquivo.ts                   # teste de lógica (não há
 - Atualizar todo mês (a Receita publica mensalmente; ~5,4 GB, uns 25 min + 2 min de processamento):
   ```bash
   npm run cnpj:baixar             # baixa o mês mais recente para .cache/ (fora do git)
+  npm run cnpj:mapa -- SC         # sites/redes do OpenStreetMap (~25 s) para juntar às empresas
   npm run cnpj:gerar -- AAAA-MM SC
   ```
+- A Receita não tem site: o `cnpj:mapa` junta o site/rede do mapa pelo telefone (ou nome único). Sem ele,
+  empresa com site aparece "sem site" (eram 90 casos só em Florianópolis).
+- Site pelo e-mail da empresa (`siteFromEmail`): no ar, basta UMA palavra do nome ou o telefone; quebrado ou
+  estacionado vira "fora do ar" só se o domínio tiver uma palavra do nome (e-mail de contador não conta).
+- Mesmo nome fantasia com outro CNPJ (matriz/filial) aparece uma vez só.
   Depois: conferir o resumo (empresas, cidades, tamanho), testar uma busca e publicar por PR.
 - Telefone da Receita conta como confirmado se a empresa tem até 6 anos; mais antiga aparece com aviso.
   "CNPJ ativo" confirma que a empresa existe no papel (pode estar parada: por isso o texto diz "CNPJ ativo").

@@ -9,7 +9,8 @@
     "lint": "eslint",
     "security:scan": "node scripts/observatory-local.mjs",
     "cnpj:baixar": "node scripts/cnpj/download.mjs",
-    "cnpj:gerar": "node scripts/cnpj/build.mjs"
+    "cnpj:gerar": "node scripts/cnpj/build.mjs",
+    "cnpj:mapa": "node scripts/cnpj/osm.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
