@@ -7,47 +7,47 @@
    "cidades": 95
   },
   "AL": {
-   "empresas": 15326,
+   "empresas": 15325,
    "cidades": 514
   },
   "AR": {
-   "empresas": 10136,
+   "empresas": 10135,
    "cidades": 460
   },
   "AZ": {
-   "empresas": 14420,
+   "empresas": 14417,
    "cidades": 217
   },
   "CA": {
-   "empresas": 83703,
+   "empresas": 83693,
    "cidades": 1085
   },
   "CO": {
-   "empresas": 12625,
+   "empresas": 12622,
    "cidades": 315
   },
   "CT": {
-   "empresas": 9158,
+   "empresas": 9157,
    "cidades": 228
   },
   "DC": {
-   "empresas": 1216,
+   "empresas": 1215,
    "cidades": 2
   },
   "DE": {
-   "empresas": 2299,
+   "empresas": 2297,
    "cidades": 59
   },
   "FL": {
-   "empresas": 65994,
+   "empresas": 65974,
    "cidades": 597
   },
   "GA": {
-   "empresas": 29362,
+   "empresas": 29356,
    "cidades": 571
   },
   "HI": {
-   "empresas": 3026,
+   "empresas": 3025,
    "cidades": 75
   },
   "IA": {
@@ -59,7 +59,7 @@
    "cidades": 202
   },
   "IL": {
-   "empresas": 30045,
+   "empresas": 30042,
    "cidades": 1142
   },
   "IN": {
@@ -71,35 +71,35 @@
    "cidades": 491
   },
   "KY": {
-   "empresas": 12945,
+   "empresas": 12941,
    "cidades": 574
   },
   "LA": {
-   "empresas": 15961,
+   "empresas": 15954,
    "cidades": 408
   },
   "MA": {
-   "empresas": 14758,
+   "empresas": 14752,
    "cidades": 450
   },
   "MD": {
-   "empresas": 12624,
+   "empresas": 12622,
    "cidades": 393
   },
   "ME": {
-   "empresas": 4414,
+   "empresas": 4411,
    "cidades": 432
   },
   "MI": {
-   "empresas": 23771,
+   "empresas": 23768,
    "cidades": 1204
   },
   "MN": {
-   "empresas": 10359,
+   "empresas": 10358,
    "cidades": 775
   },
   "MO": {
-   "empresas": 15660,
+   "empresas": 15658,
    "cidades": 807
   },
   "MS": {
@@ -111,11 +111,11 @@
    "cidades": 228
   },
   "NC": {
-   "empresas": 28593,
+   "empresas": 28591,
    "cidades": 703
   },
   "ND": {
-   "empresas": 2523,
+   "empresas": 2522,
    "cidades": 290
   },
   "NE": {
@@ -123,11 +123,11 @@
    "cidades": 416
   },
   "NH": {
-   "empresas": 3360,
+   "empresas": 3359,
    "cidades": 236
   },
   "NJ": {
-   "empresas": 20797,
+   "empresas": 20794,
    "cidades": 717
   },
   "NM": {
@@ -135,15 +135,15 @@
    "cidades": 181
   },
   "NV": {
-   "empresas": 6314,
+   "empresas": 6313,
    "cidades": 82
   },
   "NY": {
-   "empresas": 54397,
+   "empresas": 54374,
    "cidades": 1575
   },
   "OH": {
-   "empresas": 26847,
+   "empresas": 26842,
    "cidades": 1009
   },
   "OK": {
@@ -151,23 +151,23 @@
    "cidades": 465
   },
   "OR": {
-   "empresas": 8897,
+   "empresas": 8894,
    "cidades": 309
   },
   "PA": {
-   "empresas": 31881,
+   "empresas": 31876,
    "cidades": 2115
   },
   "RI": {
-   "empresas": 2974,
+   "empresas": 2973,
    "cidades": 61
   },
   "SC": {
-   "empresas": 14620,
+   "empresas": 14618,
    "cidades": 339
   },
   "SD": {
-   "empresas": 2681,
+   "empresas": 2678,
    "cidades": 274
   },
   "TN": {
@@ -175,7 +175,7 @@
    "cidades": 504
   },
   "TX": {
-   "empresas": 86989,
+   "empresas": 86980,
    "cidades": 1341
   },
   "UT": {
@@ -183,7 +183,7 @@
    "cidades": 239
   },
   "VA": {
-   "empresas": 17597,
+   "empresas": 17595,
    "cidades": 610
   },
   "VT": {
@@ -191,11 +191,11 @@
    "cidades": 246
   },
   "WA": {
-   "empresas": 14369,
+   "empresas": 14368,
    "cidades": 392
   },
   "WI": {
-   "empresas": 14919,
+   "empresas": 14916,
    "cidades": 909
   },
   "WV": {
@@ -203,7 +203,7 @@
    "cidades": 438
   },
   "WY": {
-   "empresas": 2072,
+   "empresas": 2071,
    "cidades": 113
   }
  }

@@ -1,6 +1,6 @@
 import { findCity, neighborCities, type City } from "./brCities";
 import { UF_NAMES } from "./ufData";
-import { findUsCity, usNeighborCities } from "./usCities";
+import { findUsCity, parseUsPlace, topUsCities, usNeighborCities, US_STATE_NAMES } from "./usCities";
 import { normalizeText } from "./text";
 
 export interface SearchLocation {
@@ -12,6 +12,11 @@ export interface SearchLocation {
   queries: string[];
   /** "region" = país/estado inteiro: não há uma cidade específica para conferir com o endereço do lead. */
   scope?: "city" | "region";
+  /**
+   * EUA: 1ª volta pelas cidades só com as empresas "certas" (todas as checagens passam), 2ª volta com o resto.
+   * Sem isto, a cidade pedida esgotava as incertas antes de a busca chegar às certas das vizinhas.
+   */
+  usPass?: "sure" | "rest";
 }
 
 const cityAliases: Record<string, string> = {
@@ -79,6 +84,7 @@ function locationFor(name: string, country: string, isExpansion: boolean, city?:
  * (polos curados para as grandes capitais; para as demais, municípios da mesma região do IBGE por população).
  */
 export function resolveLocations(rawCity: string, country: string): SearchLocation[] {
+  if (country === "us") return resolveUsLocations(rawCity);
   const parts = rawCity.split(" - ");
   const typed = parts[0].trim();
   const typedUf = parts[1]?.trim().toUpperCase();
@@ -115,3 +121,55 @@ export function resolveLocations(rawCity: string, country: string): SearchLocati
 
   return queue;
 }
+
+/** Busca por estado ou país nos EUA: as cidades com mais empresas, em ordem (cada uma tem o arquivo do Overture). */
+const US_REGION_CITIES = 20;
+
+/**
+ * EUA: aceita a cidade de vários jeitos ("Orlando, FL", "orlando fl", "Miami Florida", "Orlnado"), o estado inteiro
+ * ("Texas", "TX") ou o país ("USA"). Antes, o que não fosse "Cidade - UF" caía na busca de reserva do mapa, que
+ * nos EUA quase não tem telefone e não confirma nada.
+ */
+function resolveUsLocations(rawCity: string): SearchLocation[] {
+  const place = parseUsPlace(rawCity);
+  const us = (name: string, state: string | undefined, isExpansion: boolean) => locationFor(name, "us", isExpansion, undefined, state);
+
+  if (place.kind === "country" || place.kind === "state") {
+    const state = place.kind === "state" ? place.state : undefined;
+    const cities = topUsCities(state, US_REGION_CITIES);
+    if (cities.length === 0) {
+      const label = state ? US_STATE_NAMES[state] : "United States";
+      return [{ city: label, uf: state, isExpansion: false, queries: [label], scope: "region" }];
+    }
+    return twoPasses(cities.map((c, i) => us(c.name, c.state, i > 0)));
+  }
+  if (place.kind === "unknown") return [us(place.name, undefined, false)];
+  if (place.kind === "typed") return twoPasses(withState([us(place.name, place.state, false)], place.state));
+
+  const { city } = place;
+  const queue = [us(city.name, city.state, false)];
+  const curatedKey = expansionKeys.get(normalizeText(city.name));
+  if (curatedKey) {
+    for (const neighbor of expansionMap[curatedKey]) {
+      const record = findUsCity(neighbor, city.state) ?? findUsCity(neighbor);
+      queue.push(us(record?.name ?? neighbor, record?.state, true));
+    }
+  } else {
+    for (const neighbor of usNeighborCities(city)) queue.push(us(neighbor.name, neighbor.state, true));
+  }
+  return twoPasses(withState(queue, city.state));
+}
+
+/** Depois das vizinhas, as maiores cidades do mesmo estado (cidade pequena dava poucos leads: Boise, 23 de 50). */
+function withState(queue: SearchLocation[], state: string): SearchLocation[] {
+  const seen = new Set(queue.map((l) => `${normalizeText(l.city)}|${l.uf}`));
+  for (const c of topUsCities(state, US_REGION_CITIES)) {
+    if (!seen.has(`${normalizeText(c.name)}|${c.state}`)) queue.push(locationFor(c.name, "us", true, undefined, c.state));
+  }
+  return queue;
+}
+
+const twoPasses = (queue: SearchLocation[]): SearchLocation[] => [
+  ...queue.map((l) => ({ ...l, usPass: "sure" as const })),
+  ...queue.map((l) => ({ ...l, usPass: "rest" as const })),
+];

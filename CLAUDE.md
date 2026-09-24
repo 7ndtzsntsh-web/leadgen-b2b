@@ -110,6 +110,16 @@ node_modules/.bin/jiti arquivo.ts                   # teste de lógica (não há
   sem ponto nem apóstrofo). Antes eram arquivos separados e a busca por uma não via as empresas da outra.
 - Verificação: telefone "da ficha do Overture, atualizada em MM/AAAA" conta como confirmado se a ficha tem até 2
   anos; "aberta" conta se a confiança for >= 80%.
+- **Campo de cidade dos EUA** (`parseUsPlace` em `src/lib/usCities.ts`): aceita "Orlando, FL", "orlando fl", "Miami Florida",
+  CEP, erro de digitação ("Orlnado"), o estado ("Texas", "TX", "Flórida") e o país ("USA", "EUA" ou vazio). Antes, o que
+  não fosse "Cidade - UF" caía no OpenStreetMap: poucos leads, nada confirmado e texto de "DDD" (o dono reclamou).
+- Cidade com dados do Overture e nicho da tabela: **o OpenStreetMap não roda nos EUA** (quase não tem telefone e não
+  confirma nada). Só roda para nicho fora da tabela ou cidade sem dados. No Brasil nada disso muda.
+- Ordem nos EUA (`usPass`): 1ª volta por todas as cidades só com as empresas "certas" (confiança >= 80%, ficha de até 2
+  anos, código de área do estado); 2ª volta com o resto. Cidades: a pedida, vizinhas em 60 km e as maiores do estado.
+- Código de área (`src/lib/data/usAreaCodes.json`, gerado pelo `us:gerar` a partir dos dados; cada código é de um
+  estado): checagem `codigo-area`. De outro estado (~3%, celular trazido de outro estado) = PARCIAL e vai para o fim.
+  Número do Canadá ou do Caribe (`NANP_FOREIGN`) não vale. Nos EUA nunca escrever "DDD".
 - **Nos EUA não há WhatsApp: o botão de mensagem é "E-mail"** (abre o app de e-mail com assunto e texto em inglês,
   `buildEmailSubject`/`buildEmailBody`), e "Ligar" continua. Não há como saber se o número é celular: sem selo CEL/FIXO.
   Por isso, entre as fichas com confiança >= 80%, vêm primeiro as que têm e-mail (~34% têm). Os botões usam o país

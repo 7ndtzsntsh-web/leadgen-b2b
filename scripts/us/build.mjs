@@ -205,13 +205,22 @@ const isPlatform = (url) => {
 
 // Mesmas regras de cleanPhone (src/lib/leadRules.ts) para "us". Devolve 10 dígitos ou null.
 const NON_GEO = new Set(["800", "822", "833", "844", "855", "866", "877", "888", "880", "881", "882", "883", "884", "885", "886", "887", "889", "900", "500", "521", "522", "523", "524", "525", "526", "527", "528", "529", "533", "544", "566", "577", "588", "600", "700", "710"]);
+// Mesmo formato, mas de outro país (Canadá, Caribe). Mesma lista de NANP_FOREIGN em src/lib/leadRules.ts.
+const NANP_FOREIGN = new Set([
+  "204", "226", "236", "249", "250", "257", "263", "273", "289", "306", "343", "354", "365", "367", "368", "382", "387",
+  "403", "416", "418", "428", "431", "437", "438", "450", "460", "468", "474", "506", "514", "519", "548", "579", "581",
+  "584", "587", "604", "613", "639", "647", "672", "683", "705", "709", "742", "753", "778", "780", "782", "807", "819",
+  "825", "867", "873", "879", "902", "905", "942",
+  "242", "246", "264", "268", "284", "345", "441", "473", "649", "658", "664", "721", "758", "767", "784", "809", "829",
+  "849", "868", "869", "876",
+]);
 function usPhone(raw) {
   let d = String(raw ?? "").replace(/\D/g, "");
   if (d.length === 11 && d.startsWith("1")) d = d.slice(1);
   if (d.length !== 10 || /^(\d)\1+$/.test(d)) return null;
   const area = d.slice(0, 3);
   const exchange = d.slice(3, 6);
-  if (!/^[2-9]\d\d$/.test(area) || /^[2-9]11$/.test(area) || NON_GEO.has(area)) return null;
+  if (!/^[2-9]\d\d$/.test(area) || /^[2-9]11$/.test(area) || NON_GEO.has(area) || NANP_FOREIGN.has(area)) return null;
   if (!/^[2-9]\d\d$/.test(exchange) || /^[2-9]11$/.test(exchange)) return null;
   if (exchange === "555" && d.slice(6, 8) === "01") return null;
   return d;
@@ -388,6 +397,29 @@ writeFileSync(join(OUT, "index.json"), JSON.stringify({ fonte: "Overture Maps Fo
 writeFileSync(join("src", "lib", "data", "nicheOverture.json"), JSON.stringify(nicheCats, null, 1) + "\n");
 const listed = cityList.filter((c) => c[2] >= MIN_CITY_LEADS).sort((a, b) => b[2] - a[2] || a[0].localeCompare(b[0]));
 writeFileSync(join("src", "lib", "data", "usCities.json"), JSON.stringify(listed) + "\n");
+
+// Código de área -> estado (cada código dos EUA é de um estado só). Tirado dos próprios dados: o estado onde está a
+// maioria das empresas com aquele código (com 20+ empresas e 50%+ num estado). A busca mostra se o código do
+// telefone é do mesmo estado da empresa. Porto Rico e ilhas não entram nos dados: vão fixos.
+const areaStates = new Map();
+for (const [state, cities] of states) {
+  for (const { rows } of cities.values()) {
+    for (const row of rows) {
+      const code = row[5][0].slice(0, 3);
+      if (!areaStates.has(code)) areaStates.set(code, {});
+      const counts = areaStates.get(code);
+      counts[state] = (counts[state] ?? 0) + 1;
+    }
+  }
+}
+const areaCodes = { 787: "PR", 939: "PR", 340: "VI", 670: "MP", 671: "GU", 684: "AS" };
+for (const [code, counts] of [...areaStates].sort(([a], [b]) => a.localeCompare(b))) {
+  if (areaCodes[code]) continue;
+  const total = Object.values(counts).reduce((s, n) => s + n, 0);
+  const [top, n] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  if (total >= 20 && n / total >= 0.5) areaCodes[code] = top;
+}
+writeFileSync(join("src", "lib", "data", "usAreaCodes.json"), JSON.stringify(areaCodes) + "\n");
 
 console.log(
   `\nGravadas: ${total.companies} empresas (${total.emails} com e-mail) em ${total.cities} cidades de ${states.size} estados, ` +

@@ -28,6 +28,13 @@ export interface VerificationInput {
   phoneReplaced?: boolean;
   /** UF usada para validar o DDD (mostrada no detalhe). */
   uf?: string;
+  /** País da busca: nos EUA não existe "DDD", é código de área. */
+  country?: string;
+  /**
+   * EUA: o código de área do telefone e os estados (por extenso) dele e da empresa. Cada código é de um estado só;
+   * diferente = o dono pode ter trazido o celular de outro estado, ou o número é antigo.
+   */
+  usAreaCode?: { code: string; codeState: string; companyState: string };
   /** WhatsApp confirmado (link no site/perfil da empresa ou campo de WhatsApp do cadastro). */
   whatsapp?: string;
   whatsappOrigin?: WhatsAppOrigin;
@@ -109,7 +116,13 @@ function phoneCheck(input: VerificationInput): LeadCheck {
           : "Telefone da ficha no Overture Maps, sem data de atualização: o número pode ter mudado" };
     }
     default:
-      return { key: "telefone", ok: false, detail: `Formato e DDD válidos${ddd}, mas o número não foi confirmado em outra fonte` };
+      return {
+        key: "telefone",
+        ok: false,
+        detail: input.country === "us"
+          ? "Número dos EUA válido (código de área existe), mas não foi confirmado em outra fonte"
+          : `Formato e DDD válidos${ddd}, mas o número não foi confirmado em outra fonte`,
+      };
   }
 }
 
@@ -166,6 +179,12 @@ export function buildChecks(input: VerificationInput): LeadCheck[] {
   const checks: LeadCheck[] = [];
 
   if (input.phone) checks.push(phoneCheck(input));
+  if (input.phone && input.usAreaCode) {
+    const { code, codeState, companyState } = input.usAreaCode;
+    checks.push(codeState === companyState
+      ? { key: "codigo-area", ok: true, detail: `Código de área ${code} é de ${codeState}, o mesmo estado da empresa` }
+      : { key: "codigo-area", ok: false, detail: `Código de área ${code} é de ${codeState}, mas a empresa fica em ${companyState}: pode ser o celular do dono trazido de outro estado, ou um número antigo` });
+  }
 
   if (input.whatsapp) {
     checks.push({
