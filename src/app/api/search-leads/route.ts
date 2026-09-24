@@ -13,7 +13,8 @@ import { areaKey, checkAddress, type AddressCheck, type SearchedArea, type Struc
 import { checkEmailDomain, fixEmailTypo, isAccountantEmail } from '@/lib/emailCheck';
 import { candidateDomains, findOwnWebsite, siteFromEmail } from '@/lib/siteFinder';
 import { CNPJ_UFS, loadCompanies, nicheFilter, type NicheFilter } from '@/lib/cnpjSource';
-import { US_STATES, loadUsCompanies, usNicheFilter, type UsNicheFilter } from '@/lib/usSource';
+import { US_STATES, loadUsCompanies, usAreaCodeState, usNicheFilter, type UsNicheFilter } from '@/lib/usSource';
+import { US_STATE_NAMES } from '@/lib/usCities';
 import { UF_NAMES } from '@/lib/ufData';
 import { OVERTURE_FRESH_YEARS, OVERTURE_SURE, RECEITA_PHONE_FRESH_YEARS, buildChecks, isOwnSiteLive, isVerified, yearsSince, type PhoneOrigin, type WhatsAppOrigin } from '@/lib/verification';
 import {
@@ -291,11 +292,18 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
   if (!matchesSiteFilters(siteStatus, ctx.onlyNoSite, ctx.onlyInsecure)) return;
 
   const phoneType = getPhoneType(phone, ctx.country);
+  // EUA: o código de área do telefone é do mesmo estado da empresa? (No Brasil o DDD já é validado no cleanPhone.)
+  const codeState = ctx.country === 'us' && phone !== NO_PHONE && raw.uf ? usAreaCodeState(phone) : undefined;
+  const usAreaCode = codeState && raw.uf
+    ? { code: phone.replace(/\D/g, '').slice(-10, -7), codeState: US_STATE_NAMES[codeState] ?? codeState, companyState: US_STATE_NAMES[raw.uf] ?? raw.uf }
+    : undefined;
   const checks = buildChecks({
     phone: phone !== NO_PHONE ? phone : undefined,
     phoneOrigin,
     phoneReplaced,
     uf: ctx.country === 'br' ? raw.uf : undefined,
+    country: ctx.country,
+    usAreaCode,
     whatsapp,
     whatsappOrigin,
     unconfirmedMobile: !whatsapp && phoneType === 'MOBILE',
@@ -665,22 +673,37 @@ async function collectFromCnpj(ctx: MiningContext, queue: AsyncQueue<RawLead>, l
  * EUA: empresas do Overture Maps (public/us), já sem site próprio. Vêm antes do mapa, como a Receita no Brasil.
  * Ordem: confiança alta e ficha recente primeiro; dentro de cada faixa, misturado de um jeito fixo.
  */
-async function collectFromOverture(ctx: MiningContext, queue: AsyncQueue<RawLead>, loc: SearchLocation, term: string, filter: UsNicheFilter): Promise<void> {
-  if (ctx.country !== 'us' || !loc.uf || !US_STATES.has(loc.uf) || loc.scope === 'region') return;
+/**
+ * EUA: empresas do Overture na cidade. Devolve true quando a cidade tem dados e o nicho é conhecido: aí a busca de
+ * reserva do mapa (OpenStreetMap) não roda, porque nos EUA ela quase não tem telefone e não confirma nada (eram os
+ * leads "não confirmados" misturados). Nicho fora da tabela ou cidade sem dados: o mapa ainda ajuda.
+ */
+async function collectFromOverture(ctx: MiningContext, queue: AsyncQueue<RawLead>, loc: SearchLocation, term: string, filter: UsNicheFilter): Promise<boolean> {
+  if (ctx.country !== 'us' || !loc.uf || !US_STATES.has(loc.uf) || loc.scope === 'region') return false;
   const companies = await loadUsCompanies(ctx.origin, loc.uf, loc.city, filter);
-  if (!companies) return;
+  if (!companies) return false;
+  const covered = !!filter.categories;
 
   // Nos EUA não há WhatsApp: a abordagem é por e-mail (e ligação). Por isso, entre as que certamente existem, vem
-  // primeiro quem tem e-mail; depois a ficha mais recente.
-  const tierOf = (c: { confidence: number; updated: string; email: string }) =>
-    (c.confidence >= OVERTURE_SURE ? 0 : 4) + (c.email ? 0 : 2) + (c.updated && yearsSince(c.updated) <= OVERTURE_FRESH_YEARS ? 0 : 1);
+  // primeiro quem tem e-mail; depois a ficha mais recente. Telefone com código de área de OUTRO estado vai para o fim.
+  const tierOf = (c: { confidence: number; updated: string; email: string }, phone: string) => {
+    const codeState = usAreaCodeState(phone);
+    return (codeState && codeState !== loc.uf ? 8 : 0) + (c.confidence >= OVERTURE_SURE ? 0 : 4) + (c.email ? 0 : 2) +
+      (c.updated && yearsSince(c.updated) <= OVERTURE_FRESH_YEARS ? 0 : 1);
+  };
+  // "Certa" = todas as checagens vão passar: confiança >= 80%, ficha recente e código de área do estado. Na 1ª volta
+  // pelas cidades só entram as certas; as outras ficam para a 2ª volta (antes a cidade pedida esgotava as incertas
+  // antes de a busca chegar às certas das vizinhas).
+  const isSure = (tier: number) => tier % 2 === 0 && tier < 4;
   const found = companies
-    .map((c) => ({ c, phones: cleanPhones(c.phones, 'us'), tier: tierOf(c), mix: mixKey(c.id) }))
+    .map((c) => ({ c, phones: cleanPhones(c.phones, 'us') }))
     .filter(({ phones }) => phones.length > 0)
+    .map(({ c, phones }) => ({ c, phones, tier: tierOf(c, phones[0]), mix: mixKey(c.id) }))
+    .filter(({ tier }) => !loc.usPass || (loc.usPass === 'sure') === isSure(tier))
     .sort((a, b) => a.tier - b.tier || a.mix - b.mix || a.c.id.localeCompare(b.c.id));
 
   for (const { c, phones } of found) {
-    if (ctx.isDone()) return;
+    if (ctx.isDone()) return covered;
     acceptPlace(ctx, queue, loc, {
       id: `overture/${c.id}`,
       source: 'overture',
@@ -702,6 +725,7 @@ async function collectFromOverture(ctx: MiningContext, queue: AsyncQueue<RawLead
       expansionSource: loc.city,
     }, false);
   }
+  return covered;
 }
 
 // ---------------------------------------------------------------------------
@@ -777,9 +801,11 @@ export async function GET(req: NextRequest) {
           if (ctx.isDone() || ctx.fatal) break;
           ctx.send({
             type: 'info',
-            message: loc.isExpansion
-              ? `Meta ainda não atingida (${ctx.streamed}/${volume}). Expandindo para ${loc.city}...`
-              : `Buscando em ${loc.city}...`,
+            message: loc.usPass === 'rest'
+              ? `Meta ainda não atingida (${ctx.streamed}/${volume}). Buscando as empresas com dados menos confirmados em ${loc.city}...`
+              : loc.isExpansion
+                ? `Meta ainda não atingida (${ctx.streamed}/${volume}). Expandindo para ${loc.city}...`
+                : `Buscando em ${loc.city}...`,
           });
 
           // Coleta e validação rodam ao mesmo tempo: cada lugar encontrado já entra na fila de verificação.
@@ -795,9 +821,9 @@ export async function GET(req: NextRequest) {
 
           try {
             await collectFromCnpj(ctx, queue, loc, terms[0], cnpjFilter);
-            await collectFromOverture(ctx, queue, loc, terms[0], usFilter);
+            const overtureCovered = await collectFromOverture(ctx, queue, loc, terms[0], usFilter);
             if (GOOGLE_API_KEY) await collectFromGoogle(ctx, queue, loc, terms);
-            else await collectFromNominatim(ctx, queue, loc, terms, typeTerms);
+            else if (!overtureCovered && loc.usPass !== 'sure') await collectFromNominatim(ctx, queue, loc, terms, typeTerms);
           } finally {
             queue.close();
           }

@@ -1,6 +1,7 @@
 import usIndex from "../../public/us/index.json";
 import { runPool } from "./async";
 import nicheOverture from "./data/nicheOverture.json";
+import areaCodes from "./data/usAreaCodes.json";
 import { loadIndex, loadRows } from "./regionFiles";
 import { findDictionaryKey } from "./semanticDictionary";
 import { usCityKey } from "./usCities";
@@ -95,4 +96,14 @@ export async function loadUsCompanies(origin: string, state: string, city: strin
     else for (const c of companiesFor(companies, filter)) found.push(c);
   });
   return failed && found.length === 0 ? null : found;
+}
+
+// Código de área -> estado (gerado por scripts/us/build.mjs a partir dos dados; cada código é de um estado só).
+const AREA_STATES = areaCodes as Record<string, string>;
+
+/** Estado do código de área do telefone ("(305) 494-9436" -> "FL"); undefined quando não se sabe. */
+export function usAreaCodeState(phone: string): string | undefined {
+  const digits = phone.replace(/\D/g, "");
+  const local = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  return local.length === 10 ? AREA_STATES[local.slice(0, 3)] : undefined;
 }

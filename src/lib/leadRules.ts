@@ -8,7 +8,7 @@ export const NO_PHONE = "Não informado";
 
 /** Uma checagem real feita sobre o lead. `ok: false` = não confirmada (o motivo vai em `detail`). */
 export interface LeadCheck {
-  key: "telefone" | "whatsapp" | "email" | "site" | "atividade" | "cidade";
+  key: "telefone" | "codigo-area" | "whatsapp" | "email" | "site" | "atividade" | "cidade";
   ok: boolean;
   detail: string;
   /**
@@ -136,6 +136,8 @@ export function cleanPhone(phone: string, country: string, uf?: string): string 
     // DDD e prefixo começam de 2 a 9 e não são N11; 8XX/900 são gratuitos/pagos (não levam ao dono);
     // 555-01XX é número de filme.
     if (!/^[2-9]\d\d$/.test(area) || /^[2-9]11$/.test(area) || US_NON_GEOGRAPHIC.has(area)) return NO_PHONE;
+    // Mesmo formato, mas de outro país (Canadá, Caribe): numa empresa dos EUA é número errado ou internacional.
+    if (NANP_FOREIGN.has(area)) return NO_PHONE;
     if (!/^[2-9]\d\d$/.test(exchange) || /^[2-9]11$/.test(exchange)) return NO_PHONE;
     if (exchange === "555" && digits.slice(6, 8) === "01") return NO_PHONE;
     return `(${area}) ${exchange}-${digits.slice(6)}`;
@@ -146,6 +148,19 @@ export function cleanPhone(phone: string, country: string, uf?: string): string 
 
 // Números dos EUA sem cidade: gratuitos (800...), pagos (900) e serviços especiais.
 const US_NON_GEOGRAPHIC = new Set(["800", "822", "833", "844", "855", "866", "877", "888", "880", "881", "882", "883", "884", "885", "886", "887", "889", "900", "500", "521", "522", "523", "524", "525", "526", "527", "528", "529", "533", "544", "566", "577", "588", "600", "700", "710"]);
+
+// Códigos de área do mesmo plano de numeração que NÃO são dos EUA: Canadá e países do Caribe. (Porto Rico e as
+// outras ilhas dos EUA continuam valendo.) Mesma lista de NANP_FOREIGN em scripts/us/build.mjs.
+export const NANP_FOREIGN = new Set([
+  // Canadá
+  "204", "226", "236", "249", "250", "257", "263", "273", "289", "306", "343", "354", "365", "367", "368", "382", "387",
+  "403", "416", "418", "428", "431", "437", "438", "450", "460", "468", "474", "506", "514", "519", "548", "579", "581",
+  "584", "587", "604", "613", "639", "647", "672", "683", "705", "709", "742", "753", "778", "780", "782", "807", "819",
+  "825", "867", "873", "879", "902", "905", "942",
+  // Caribe e Bermudas
+  "242", "246", "264", "268", "284", "345", "441", "473", "649", "658", "664", "721", "758", "767", "784", "809", "829",
+  "849", "868", "869", "876",
+]);
 
 /** Limpa uma lista de números (vários campos, vários números por campo), sem repetir. */
 export function cleanPhones(raws: (string | undefined)[], country: string, uf?: string): string[] {
