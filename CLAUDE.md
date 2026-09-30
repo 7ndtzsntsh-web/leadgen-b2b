@@ -57,6 +57,20 @@ node_modules/.bin/jiti arquivo.ts                   # teste de lógica (não há
 - E-mail do lead (`fixEmailTypo` e `isAccountantEmail` em `src/lib/emailCheck.ts`): provedor digitado errado vira o certo
   ("gamil.com" -> gmail.com; eram milhares, e o e-mail iria para o domínio de outra pessoa); e-mail de contador
   ("contabilidadexyz@", "joao.contador@") sai, a não ser que a empresa seja de contabilidade. Depois, o MX é conferido.
+- **Confirmados primeiro e marcação dos leads (pedido do dono em 30/09/2026: "muitas empresas não responderam e não
+  tinham WhatsApp").** Medido: ~90% dos leads do Brasil são o celular da Receita (sem como confirmar WhatsApp de graça);
+  só ~6% têm WhatsApp confirmado, e quase todos esses JÁ TÊM SITE (o link do WhatsApp vem do site). Mesmo assim o dono
+  pediu os confirmados no topo: `compareLeads` põe WhatsApp confirmado > telefone em 2 fontes (`phoneCrossChecked`:
+  mesmo número no site da empresa ou no mapa) > resto; quem quer só "sem site" marca o filtro.
+  - 2ª fonte do mapa: `cnpj:mapa` baixa também os lugares com telefone/WhatsApp do OpenStreetMap; o `cnpj:gerar` grava
+    nas colunas "mapa" (número achado num lugar com o MESMO nome) e "whatsapp" (o que o mapa diz ser WhatsApp). Em SC:
+    1.159 empresas (0,8%), 228 celulares, 47 WhatsApp. Celular confirmado e WhatsApp do mapa sobem na fila da Receita
+    (`cnpjTier` -1/-2); fixo confirmado não sobe (são 80% e não têm WhatsApp). Em 30/09 só SC foi regerado; os outros
+    estados ganham isso na atualização do mês.
+  - Marcação (`src/lib/leadStatus.ts`): Enviado / Sem WhatsApp / Respondeu / Não quer, no navegador do aparelho
+    (localStorage, não vai para servidor). Abrir o WhatsApp/e-mail marca "Enviado" sozinho. Os números marcados vão na
+    busca no parâmetro `pular` (últimos 8 dígitos em base 36, até 1.500 = ~10 KB de URL) e o servidor não traz esses
+    leads de volta (completa a meta com outros). O resumo mostra a taxa de resposta.
 - **Idade da empresa não dá ponto.** Antes a empresa nova ganhava +10 e a Receita vinha "da mais nova para a mais
   velha": a lista virava só empresa recém-aberta. Agora a ordem da Receita é por faixa (`cnpjTier`: celular com
   telefone recente primeiro, até 6 anos), misturada de um jeito fixo dentro da faixa (`mixKey`), e o telefone

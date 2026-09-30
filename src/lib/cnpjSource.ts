@@ -28,6 +28,10 @@ export interface CnpjCompany {
   email: string;
   /** Site ou rede social que o OpenStreetMap tem para esta empresa (a Receita não tem site). */
   site: string;
+  /** Telefone (só dígitos, como na Receita) que também está no mapa (OpenStreetMap), num lugar com o mesmo nome, ou "". */
+  mapPhone: string;
+  /** Número que o mapa diz ser o WhatsApp da empresa (só dígitos, como na Receita), ou "". */
+  mapWhatsApp: string;
 }
 
 interface NicheRule {
@@ -56,9 +60,10 @@ export function nicheFilter(term: string): NicheFilter {
 
 const citySlug = (city: string) => normalizeText(city).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-type Row = [string, string, string, string, string, string, string, string[], string, string?];
+// "mapa" e "whatsapp" só existem quando o telefone foi achado no mapa (estados gerados antes disso não têm).
+type Row = [string, string, string, string, string, string, string, string[], string, string?, string?, string?];
 
-const toCompany = ([cnpj, name, cnae, inicio, street, district, cep, phones, email, site]: Row): CnpjCompany => ({
+const toCompany = ([cnpj, name, cnae, inicio, street, district, cep, phones, email, site, mapa, whatsapp]: Row): CnpjCompany => ({
   cnpj,
   name,
   cnae,
@@ -69,6 +74,8 @@ const toCompany = ([cnpj, name, cnae, inicio, street, district, cep, phones, ema
   phones,
   email,
   site: site ?? "",
+  mapPhone: mapa ?? "",
+  mapWhatsApp: whatsapp ?? "",
 });
 
 const loadUfIndex = (origin: string, uf: string) => loadIndex(origin, `/cnpj/${uf.toLowerCase()}/index.json`);

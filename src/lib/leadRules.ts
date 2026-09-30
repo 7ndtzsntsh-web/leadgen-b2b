@@ -35,6 +35,8 @@ export interface Lead {
   otherPhones?: string[];
   /** WhatsApp CONFIRMADO: link no site da empresa ou campo de WhatsApp do cadastro. Celular sem confirmação não entra aqui. */
   whatsapp?: string;
+  /** Telefone conferido em 2 fontes: o mesmo número no site da empresa ou no mapa (além do cadastro). */
+  phoneCrossChecked?: boolean;
   /** Ano da última atualização do cadastro, só quando ele é antigo (5 anos ou mais): a empresa pode ter fechado. */
   staleSince?: number;
   /** CNPJ (14 dígitos), quando o lead veio do cadastro da Receita Federal. */
@@ -81,6 +83,36 @@ const BR_DDDS = new Set(Object.values(UF_DDDS).flat());
 
 /** Mesmo número escrito de jeitos diferentes (com/sem DDI, com/sem máscara). */
 export const sameNumber = (a: string, b: string) => a.replace(/\D/g, "").slice(-9) === b.replace(/\D/g, "").slice(-9);
+
+/**
+ * Últimos 8 dígitos: identificam o número mesmo sem o 9 do celular (a Receita guarda o celular sem ele) e com
+ * ou sem DDD/DDI. Usado para não trazer de volta os leads que o usuário já marcou.
+ */
+export const lastDigits = (phone: string) => phone.replace(/\D/g, "").slice(-8);
+
+/** Máximo de números marcados que vão na busca (~7 caracteres cada: 1500 dá ~10 KB, abaixo do limite de 14 KB de URL da Vercel). */
+export const MAX_SKIP = 1500;
+
+/** Números marcados -> parâmetro curto da URL (base 36, separados por vírgula). */
+export function encodeSkipParam(phones: Iterable<string>): string {
+  const out: string[] = [];
+  for (const p of phones) {
+    const d = lastDigits(p);
+    if (d.length === 8 && out.length < MAX_SKIP) out.push(Number(d).toString(36));
+  }
+  return out.join(",");
+}
+
+/** Parâmetro da URL -> últimos 8 dígitos de cada número (entrada inválida é ignorada). */
+export function decodeSkipParam(param: string | null): Set<string> {
+  const out = new Set<string>();
+  for (const part of (param ?? "").split(",").slice(0, MAX_SKIP)) {
+    if (!/^[0-9a-z]{1,6}$/.test(part)) continue;
+    const n = parseInt(part, 36);
+    if (n <= 99_999_999) out.add(String(n).padStart(8, "0"));
+  }
+  return out;
+}
 
 /**
  * Separa um campo com vários números ("+55 48 3024-3459;+55 48 3334-3459", "3222-1234 / 99999-8888").
@@ -302,12 +334,22 @@ export function scoreLead(input: ScoreInput): number {
 }
 
 /**
- * Ordem da lista: da maior nota (mais fácil de vender) para a menor.
+ * Quão confirmado é o contato: 2 = WhatsApp confirmado; 1 = telefone conferido em 2 fontes; 0 = só o cadastro.
+ * O dono pediu os confirmados primeiro (30/09/2026): muitos números da Receita não tinham WhatsApp.
+ */
+export const contactConfirmation = (lead: Pick<Lead, "whatsapp" | "phoneCrossChecked">) =>
+  lead.whatsapp ? 2 : lead.phoneCrossChecked ? 1 : 0;
+
+/**
+ * Ordem da lista: primeiro os contatos confirmados (`contactConfirmation`); dentro de cada grupo, da maior nota
+ * (mais fácil de vender) para a menor. Atenção: o WhatsApp confirmado quase sempre vem do site da empresa, então
+ * no topo aparecem empresas que já têm site; quem quer só "sem site" marca o filtro.
  * Empates: verificado primeiro, depois quem tem WhatsApp, depois mais avaliações e, por fim, o nome
  * (assim a ordem é sempre a mesma para os mesmos leads).
  */
 export function compareLeads(a: Lead, b: Lead): number {
   return (
+    contactConfirmation(b) - contactConfirmation(a) ||
     b.score - a.score ||
     Number(!!b.verified) - Number(!!a.verified) ||
     Number(!!b.whatsapp) - Number(!!a.whatsapp) ||

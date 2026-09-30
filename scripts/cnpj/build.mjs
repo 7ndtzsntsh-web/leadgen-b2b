@@ -216,28 +216,66 @@ function matchCities(uf, codes) {
   return matched;
 }
 
-/** Sites e redes sociais do OpenStreetMap (scripts/cnpj/osm.mjs), pelo telefone ou pelo nome. */
+/** Número do mapa (só dígitos, com ou sem 55/0 na frente) na mesma chave dos telefones da Receita. */
+function osmPhoneKey(raw) {
+  let d = raw.replace(/\D/g, "");
+  if (d.startsWith("55") && d.length >= 12) d = d.slice(2);
+  if (d.startsWith("0")) d = d.slice(1);
+  return d.length >= 10 ? phoneKey(d) : undefined;
+}
+
+// Palavras que não identificam a empresa (aparecem em nomes de empresas diferentes).
+const COMMON_WORDS = new Set(["ltda", "comercio", "servicos", "loja", "casa", "centro", "brasil", "grupo", "studio", "espaco"]);
+/** Palavras do nome que servem para ver se o lugar do mapa é a mesma empresa (4+ letras, sem acento). */
+const nameWords = (s) => new Set(norm(s).split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !COMMON_WORDS.has(w)));
+
+/**
+ * Do OpenStreetMap (scripts/cnpj/osm.mjs): sites e redes sociais, pelo telefone ou pelo nome; e os lugares com
+ * telefone, para conferir o número da Receita numa 2ª fonte (e pegar o WhatsApp que o mapa tem).
+ */
 function loadOsm(uf) {
   const byPhone = new Map();
   const byName = new Map();
+  /** chave do telefone -> lugares do mapa com esse número: palavras do nome e se o número é o WhatsApp do lugar */
+  const places = new Map();
   const file = join(".cache", "osm", `${uf.toLowerCase()}-sites.json`);
   if (!existsSync(file)) {
     console.log(`  AVISO: sem ${file} (rode npm run cnpj:mapa -- ${uf}): as empresas de ${uf} ficam sem o site que o mapa tem.`);
-    return { byPhone, byName };
+    return { byPhone, byName, places };
   }
-  for (const [name, phones, website, social] of JSON.parse(readFileSync(file, "utf8")).lugares) {
+  for (const [name, phones, website, social, whatsapp = ""] of JSON.parse(readFileSync(file, "utf8")).lugares) {
     const site = website || social;
-    if (!site) continue;
+    const whatsappKey = whatsapp ? osmPhoneKey(whatsapp) : undefined;
+    const words = nameWords(name);
     for (const raw of phones) {
-      let d = raw.replace(/\D/g, "");
-      if (d.startsWith("55") && d.length >= 12) d = d.slice(2);
-      if (d.startsWith("0")) d = d.slice(1);
-      if (d.length >= 10) byPhone.set(phoneKey(d), site);
+      const k = osmPhoneKey(raw);
+      if (k === undefined) continue;
+      if (site) byPhone.set(k, site);
+      if (!places.has(k)) places.set(k, []);
+      places.get(k).push({ words, whatsapp: k === whatsappKey });
     }
+    if (!site) continue;
     const k = nameKey(name);
     byName.set(k, byName.has(k) ? null : site); // nome repetido no mapa: não dá para saber qual é
   }
-  return { byPhone, byName };
+  return { byPhone, byName, places };
+}
+
+/**
+ * O telefone da Receita está no mapa num lugar com o mesmo nome? (Mesmo número com outro nome não conta: pode ser
+ * de outra empresa.) Devolve o número achado e o número que o mapa diz ser WhatsApp ("" se nenhum).
+ */
+function onMap(osm, phones, fantasia) {
+  const words = nameWords(fantasia);
+  let phone = "";
+  let whatsapp = "";
+  for (const p of phones) {
+    const same = (osm.places.get(phoneKey(p)) ?? []).filter((place) => [...place.words].some((w) => words.has(w)));
+    if (same.length === 0) continue;
+    if (!phone) phone = p;
+    if (!whatsapp && same.some((place) => place.whatsapp)) whatsapp = p;
+  }
+  return { phone, whatsapp };
 }
 
 const clean = (s) => s.replace(/[\t\r\n]/g, " ").trim();
@@ -337,6 +375,8 @@ async function processUf(uf) {
   let accountantPhones = 0;
   let siteByPhone = 0;
   let siteByName = 0;
+  let phoneOnMap = 0;
+  let whatsappOnMap = 0;
   for await (const f of ufRows(uf)) {
     if (!f[T.fantasia]) continue;
     const phones = phonesOf(f);
@@ -363,11 +403,15 @@ async function processUf(uf) {
       siteByName++;
     }
 
+    const map = onMap(osm, okPhones, f[T.fantasia]);
+    if (map.phone) phoneOnMap++;
+    if (map.whatsapp) whatsappOnMap++;
+
     const { slug: citySlug, name: cityName } = cityOf.get(f[T.municipio]);
     const street = [f[T.tipoLogradouro], f[T.logradouro]].filter(Boolean).join(" ");
     const address = [titleCase(street), f[T.numero], titleCase(f[T.complemento])].filter(Boolean).join(", ");
     if (!cities.has(citySlug)) cities.set(citySlug, { city: cityName, rows: [] });
-    cities.get(citySlug).rows.push([
+    const row = [
       f[T.basico] + f[T.ordem] + f[T.dv],
       name,
       f[T.cnae],
@@ -378,7 +422,10 @@ async function processUf(uf) {
       okPhones,
       okEmail,
       site,
-    ]);
+    ];
+    // "mapa" e "whatsapp" só quando o telefone foi achado no mapa (a maioria não tem: arquivo menor).
+    if (map.phone) row.push(map.phone, map.whatsapp);
+    cities.get(citySlug).rows.push(row);
   }
 
   const s = writeUf(OUT, uf, month, cities);
@@ -386,7 +433,8 @@ async function processUf(uf) {
     `${uf}: ${s.companies} empresas em ${s.cities} cidades (${s.splitCities} divididas por ramo), ` +
       `${(s.bytes / 1e6).toFixed(1)} MB em ${s.files} arquivos, maior ${(s.biggestFile / 1e6).toFixed(1)} MB | ` +
       `ativas ${active}, dos nichos ${candidates}, sem contato próprio ${noContact}, telefones de contador ${accountantPhones}, ` +
-      `site do mapa ${siteByPhone} pelo telefone e ${siteByName} pelo nome | ${((Date.now() - t0) / 1000).toFixed(0)}s`,
+      `site do mapa ${siteByPhone} pelo telefone e ${siteByName} pelo nome, telefone confirmado no mapa ${phoneOnMap} ` +
+      `(WhatsApp ${whatsappOnMap}) | ${((Date.now() - t0) / 1000).toFixed(0)}s`,
   );
   return s;
 }

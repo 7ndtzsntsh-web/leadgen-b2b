@@ -7,10 +7,14 @@ import type { LeadCheck, SiteStatus } from "./leadRules";
  * - confirmado: o número do cadastro aparece também no site da empresa;
  * - site: tirado do site da empresa (o cadastro não tinha, ou tinha outro número);
  * - receita: cadastro oficial de CNPJ (número exclusivo da empresa: os de contador são descartados na importação);
+ * - mapa: cadastro da Receita E o mesmo número num lugar do mapa (OpenStreetMap) com o mesmo nome (2 fontes);
  * - overture: ficha da empresa no Overture Maps (EUA; base aberta com dados de Meta, Microsoft e outras);
  * - cadastro: só o cadastro do mapa, sem outra fonte para conferir.
  */
-export type PhoneOrigin = "google" | "confirmado" | "site" | "receita" | "overture" | "cadastro";
+export type PhoneOrigin = "google" | "confirmado" | "site" | "receita" | "mapa" | "overture" | "cadastro";
+
+/** Telefone conferido em 2 fontes (site da empresa ou mapa, além do cadastro): vai antes na lista. */
+export const isCrossChecked = (origin: PhoneOrigin) => origin === "confirmado" || origin === "mapa";
 
 /** Overture: ficha atualizada há até tantos anos conta como telefone atual; confiança (0-100) a partir da qual o lugar "existe". */
 export const OVERTURE_FRESH_YEARS = 2;
@@ -99,6 +103,8 @@ function phoneCheck(input: VerificationInput): LeadCheck {
           ? "Telefone atualizado pelo site da empresa (o cadastro do mapa tinha outro número)"
           : "Telefone tirado do site da própria empresa",
       };
+    case "mapa":
+      return { key: "telefone", ok: true, detail: "Telefone confirmado em 2 fontes: cadastro da Receita Federal e o mapa (OpenStreetMap), no lugar com o mesmo nome" };
     case "google":
       return { key: "telefone", ok: true, detail: `Telefone do Google Maps, com DDD válido${ddd}` };
     case "receita": {
