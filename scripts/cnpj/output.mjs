@@ -8,7 +8,9 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const FIELDS = ["cnpj", "nome", "cnae", "inicio", "endereco", "bairro", "cep", "telefones", "email", "site"];
+// "mapa" e "whatsapp" só existem na linha quando um telefone da Receita foi achado no OpenStreetMap num lugar com o
+// mesmo nome (2ª fonte): "mapa" é esse número e "whatsapp" o que o mapa diz ser WhatsApp ("" se não diz).
+export const FIELDS = ["cnpj", "nome", "cnae", "inicio", "endereco", "bairro", "cep", "telefones", "email", "site", "mapa", "whatsapp"];
 export const SPLIT_ROWS = 6000;
 export const SOURCE = "Receita Federal - Dados Abertos CNPJ";
 

@@ -1,6 +1,8 @@
-// Baixa do OpenStreetMap os lugares do estado que têm site ou rede social, para o build.mjs juntar às empresas
-// da Receita (a Receita não tem site). Sem isso, a empresa que tinha site no mapa aparecia "sem site":
+// Baixa do OpenStreetMap os lugares do estado que têm site, rede social ou telefone, para o build.mjs juntar às
+// empresas da Receita (a Receita não tem site). Sem isso, a empresa que tinha site no mapa aparecia "sem site":
 // em Florianópolis eram 90 casos (ex.: Lavanderia Lib Clean -> libclean.com.br).
+// O telefone serve também de 2ª fonte: o mesmo número da Receita num lugar do mapa com o mesmo nome confirma que o
+// número ainda é da empresa, e o WhatsApp que o mapa tem para esse número vira WhatsApp confirmado.
 //
 // Uso:  npm run cnpj:mapa             todos os estados (grava .cache/osm/<uf>-sites.json)
 //       npm run cnpj:mapa -- SC PR    só esses (SC: ~25 s)
@@ -24,7 +26,10 @@ const MIRRORS = [
 ];
 const SITE_KEYS = ["website", "contact:website", "url"];
 const SOCIAL_KEYS = ["contact:instagram", "instagram", "contact:facebook", "facebook"];
-const PHONE_KEYS = ["phone", "contact:phone", "mobile", "contact:mobile", "contact:whatsapp"];
+const WHATSAPP_KEYS = ["contact:whatsapp", "whatsapp"];
+const PHONE_KEYS = ["phone", "contact:phone", "mobile", "contact:mobile", ...WHATSAPP_KEYS];
+
+const digitsOf = (keys, tags) => keys.flatMap((k) => (tags[k] ?? "").split(/[;,/]/)).map((p) => p.replace(/\D/g, "")).filter((p) => p.length >= 8);
 
 function socialUrl(tags) {
   const insta = tags["contact:instagram"] || tags.instagram;
@@ -36,7 +41,7 @@ function socialUrl(tags) {
 async function query(uf) {
   // Uma consulta por chave (juntas): usa o índice de chaves do servidor. A versão com expressão regular na chave
   // varria todas as etiquetas do estado, o que num estado grande (SP) estoura o tempo do servidor.
-  const byKey = [...SITE_KEYS, ...SOCIAL_KEYS].map((k) => `nwr(area.uf)["name"]["${k}"];`).join("");
+  const byKey = [...SITE_KEYS, ...SOCIAL_KEYS, ...PHONE_KEYS].map((k) => `nwr(area.uf)["name"]["${k}"];`).join("");
   const q = `[out:json][timeout:300];area["ISO3166-2"="BR-${uf}"]->.uf;(${byKey});out tags;`;
   for (let round = 1; round <= 3; round++) {
     for (const url of MIRRORS) {
@@ -72,14 +77,19 @@ for (const uf of UFS) {
   }
   try {
     const elements = await query(uf);
+    // [nome, telefones, site, rede social, WhatsApp] (só dígitos nos números)
     const places = elements.map(({ tags }) => [
       tags.name,
-      PHONE_KEYS.flatMap((k) => (tags[k] ?? "").split(/[;,/]/)).map((p) => p.replace(/\D/g, "")).filter((p) => p.length >= 8),
+      digitsOf(PHONE_KEYS, tags),
       SITE_KEYS.map((k) => tags[k]).find(Boolean) ?? "",
       socialUrl(tags),
+      digitsOf(WHATSAPP_KEYS, tags)[0] ?? "",
     ]);
     writeFileSync(file, JSON.stringify({ geradoEm: new Date().toISOString(), lugares: places }));
-    console.log(`${uf}: ${places.length} lugares com site ou rede social (${places.filter((p) => p[1].length).length} com telefone)`);
+    console.log(
+      `${uf}: ${places.length} lugares | com site ou rede ${places.filter((p) => p[2] || p[3]).length}, ` +
+        `com telefone ${places.filter((p) => p[1].length).length}, com WhatsApp ${places.filter((p) => p[4]).length}`,
+    );
   } catch (error) {
     console.log(`${uf}: ${error.message}`);
     failed.push(uf);

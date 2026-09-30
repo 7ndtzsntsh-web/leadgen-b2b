@@ -16,10 +16,10 @@ import { CNPJ_UFS, loadCompanies, nicheFilter, type NicheFilter } from '@/lib/cn
 import { US_STATES, loadUsCompanies, usAreaCodeState, usNicheFilter, type UsNicheFilter } from '@/lib/usSource';
 import { US_STATE_NAMES } from '@/lib/usCities';
 import { UF_NAMES } from '@/lib/ufData';
-import { OVERTURE_FRESH_YEARS, OVERTURE_SURE, RECEITA_PHONE_FRESH_YEARS, buildChecks, isOwnSiteLive, isVerified, yearsSince, type PhoneOrigin, type WhatsAppOrigin } from '@/lib/verification';
+import { OVERTURE_FRESH_YEARS, OVERTURE_SURE, RECEITA_PHONE_FRESH_YEARS, buildChecks, isCrossChecked, isOwnSiteLive, isVerified, yearsSince, type PhoneOrigin, type WhatsAppOrigin } from '@/lib/verification';
 import {
-  NO_PHONE, cleanPhone, cleanPhones, getPhoneType, matchesSiteFilters, pickWhatsApp, sameNumber, scoreLead, splitPhones,
-  type SiteStatus,
+  NO_PHONE, cleanPhone, cleanPhones, decodeSkipParam, getPhoneType, lastDigits, matchesSiteFilters, pickWhatsApp, sameNumber,
+  scoreLead, splitPhones, type SiteStatus,
 } from '@/lib/leadRules';
 
 const GOOGLE_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
@@ -115,6 +115,8 @@ interface RawLead {
   website?: string;
   /** WhatsApp já conhecido na coleta (ex.: tag do OpenStreetMap). O do site é somado na validação. */
   whatsapp?: string;
+  /** Receita: telefone que também está no mapa (OpenStreetMap), num lugar com o mesmo nome (2ª fonte). */
+  phoneOnMap?: string;
   /** UF da localidade pesquisada, usada para validar o DDD do WhatsApp achado no site. */
   uf?: string;
   /** A fonte informou que a empresa está em funcionamento (Google: businessStatus = OPERATIONAL). */
@@ -146,6 +148,8 @@ interface MiningContext {
   origin: string;
   /** Nomes já vindos da Receita: o mesmo lugar no mapa é repetido e fica de fora. */
   knownNames: Set<string>;
+  /** Últimos 8 dígitos dos números que o usuário já marcou (enviado, sem WhatsApp...): esses leads não voltam. */
+  skipPhones: Set<string>;
   isDone: () => boolean;
   send: (data: unknown) => void;
 }
@@ -161,6 +165,10 @@ function acceptPlace(ctx: MiningContext, queue: AsyncQueue<RawLead>, loc: Search
   if (ctx.seenIds.has(raw.id)) return false;
   ctx.seenIds.add(raw.id);
   if (closed || raw.name === 'Desconhecido') return true; // fechado, ou cadastro sem nome (não dá para abordar)
+  // Já contatado ou marcado como sem WhatsApp pelo usuário: não ocupa lugar na lista (a meta é completada com outros).
+  if (ctx.skipPhones.size > 0 && [raw.phone, raw.whatsapp, ...(raw.otherPhones ?? [])].some((p) => p && p !== NO_PHONE && ctx.skipPhones.has(lastDigits(p)))) {
+    return true;
+  }
 
   const nameKey = normalizeText(raw.name).split(/\s[-–|]\s/)[0].replace(/[^a-z0-9]/g, '');
   // A Receita vem primeiro e é a fonte mais completa: o mesmo negócio achado depois no mapa é repetição, e o
@@ -247,7 +255,8 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
   // se o site mostra OUTRO número, vale o do site (era de onde vinham os "números errados").
   let phone = raw.phone;
   let otherPhones = raw.otherPhones ?? [];
-  let phoneOrigin: PhoneOrigin = LISTED_ORIGIN[raw.source];
+  // Número da Receita que também está no mapa (mesmo nome): conferido em 2 fontes. Só vale se é o número mostrado.
+  let phoneOrigin: PhoneOrigin = raw.phoneOnMap && sameNumber(raw.phoneOnMap, raw.phone) ? 'mapa' : LISTED_ORIGIN[raw.source];
   let phoneReplaced = false;
   const sitePhones = siteLive && inspection ? cleanPhones(inspection.phones, ctx.country, raw.uf) : [];
   if (sitePhones.length > 0) {
@@ -354,6 +363,7 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
       email,
       phoneType,
       whatsapp,
+      phoneCrossChecked: phone !== NO_PHONE && isCrossChecked(phoneOrigin) ? true : undefined,
       staleSince: ageYears !== undefined && ageYears >= STALE_WARN_YEARS && lastSeen ? Number(lastSeen.slice(0, 4)) : undefined,
       cnpj: raw.cnpj,
       openedOn: raw.openedOn,
@@ -605,12 +615,17 @@ async function collectFromNominatim(
 /**
  * Ordem das empresas da Receita (menor = antes). Antes era "a mais nova primeiro", e a lista virava só empresa
  * recém-aberta. Agora:
+ *  -2. WhatsApp confirmado pelo mapa (o dono pediu os confirmados primeiro, 30/09/2026);
+ *  -1. celular confirmado no mapa (mesmo número, mesmo nome: 2 fontes). Fixo confirmado no mapa NÃO sobe: são 80%
+ *      dos confirmados e não têm WhatsApp; eles seguem a faixa normal (e ganham o selo se entrarem na lista);
  *   0. celular e empresa com até 6 anos (o telefone do cadastro ainda deve ser do dono: RECEITA_PHONE_FRESH_YEARS);
  *   1. celular de empresa mais antiga (pode ter trocado de número);
  *   2. só fixo, empresa com até 6 anos;
  *   3. só fixo, empresa mais antiga.
  */
-function cnpjTier(c: { openedOn: string }, phones: string[], country: string): number {
+function cnpjTier(c: { openedOn: string; mapPhone: string; mapWhatsApp: string }, phones: string[], country: string): number {
+  if (c.mapWhatsApp) return -2;
+  if (c.mapPhone && getPhoneType(cleanPhone(c.mapPhone, country), country) === 'MOBILE') return -1;
   const mobile = phones.some((p) => getPhoneType(p, country) === 'MOBILE');
   const fresh = yearsSince(c.openedOn) <= RECEITA_PHONE_FRESH_YEARS;
   return (mobile ? 0 : 2) + (fresh ? 0 : 1);
@@ -644,7 +659,14 @@ async function collectFromCnpj(ctx: MiningContext, queue: AsyncQueue<RawLead>, l
 
   for (const { c, phones } of found) {
     if (ctx.isDone()) return;
-    const phone = phones.find((p) => getPhoneType(p, ctx.country) === 'MOBILE') ?? phones[0] ?? NO_PHONE;
+    // WhatsApp que o mapa (OpenStreetMap) tem para o mesmo número, no lugar com o mesmo nome: confirmado.
+    const mapWhatsApp = c.mapWhatsApp ? cleanPhone(c.mapWhatsApp, ctx.country, loc.uf) : NO_PHONE;
+    const mapPhone = c.mapPhone ? cleanPhone(c.mapPhone, ctx.country, loc.uf) : NO_PHONE;
+    // O celular é o número principal (canal da abordagem). O número confirmado no mapa vai na frente quando é celular,
+    // ou quando a empresa não tem celular.
+    const mobile = phones.find((p) => getPhoneType(p, ctx.country) === 'MOBILE');
+    const confirmed = mapPhone !== NO_PHONE ? phones.find((p) => sameNumber(p, mapPhone)) : undefined;
+    const phone = (confirmed && (!mobile || getPhoneType(confirmed, ctx.country) === 'MOBILE') ? confirmed : mobile) ?? phones[0] ?? NO_PHONE;
     const cep = c.cep.length === 8 ? `${c.cep.slice(0, 5)}-${c.cep.slice(5)}` : c.cep;
     acceptPlace(ctx, queue, loc, {
       id: `cnpj/${c.cnpj}`,
@@ -655,6 +677,8 @@ async function collectFromCnpj(ctx: MiningContext, queue: AsyncQueue<RawLead>, l
       otherPhones: phones.filter((p) => p !== phone),
       email: c.email || undefined,
       website: c.site || undefined, // site/rede social que o mapa tem (juntado na importação)
+      whatsapp: mapWhatsApp !== NO_PHONE ? mapWhatsApp : undefined,
+      phoneOnMap: mapPhone !== NO_PHONE ? mapPhone : undefined,
       cnpj: c.cnpj,
       openedOn: c.openedOn,
       address: [c.street, c.district].filter(Boolean).join(' - ') + `, ${loc.city} - ${loc.uf}, ${cep}`,
@@ -788,7 +812,7 @@ export async function GET(req: NextRequest) {
         volume, country, onlyNoSite, onlyInsecure,
         seenIds: new Set(), seenPhones: new Set(), nameCounts: new Map(),
         streamed: 0, fatal: null, googleWorked: false, area: buildSearchedArea(locations),
-        origin: req.nextUrl.origin, knownNames: new Set(),
+        origin: req.nextUrl.origin, knownNames: new Set(), skipPhones: decodeSkipParam(params.get('pular')),
         // Quando o usuário fecha a página/toca em "parar", a mineração para e não gasta mais chamadas à API.
         isDone: () => cancelled || ctx.streamed >= volume || Date.now() > deadline,
         send: (data) => write(`data: ${JSON.stringify(data)}\n\n`),

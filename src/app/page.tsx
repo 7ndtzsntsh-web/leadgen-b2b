@@ -11,9 +11,12 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  NO_PHONE, callOf, compareLeads, formatCnpj, getPhoneType, internationalNumber, isNewCompany, matchesSiteFilters, sameNumber, whatsappOf,
-  type Lead,
+  NO_PHONE, callOf, compareLeads, encodeSkipParam, formatCnpj, getPhoneType, internationalNumber, isNewCompany, matchesSiteFilters, sameNumber,
+  whatsappOf, type Lead,
 } from "@/lib/leadRules";
+import {
+  STATUS_LABEL, getMarks, getServerMarks, markKeyOf, markedNumbers, setMark, subscribeMarks, summarizeMarks, type LeadStatus,
+} from "@/lib/leadStatus";
 import { semanticDictionary, uiTranslations } from "@/lib/semanticDictionary";
 import { buildEmailBody, buildEmailSubject, buildPitch, pitchLangFor } from "@/lib/pitches";
 
@@ -91,6 +94,57 @@ interface LeadItemProps {
   onWhatsApp: (lead: Lead) => void;
   onEmail: (lead: Lead) => void;
   onCall: (lead: Lead) => void;
+  /** Como o usuário marcou este lead (fica no aparelho). */
+  status?: LeadStatus;
+  onStatus: (lead: Lead, status: LeadStatus | null) => void;
+}
+
+const STATUS_STYLE: Record<LeadStatus | "none", string> = {
+  none: "border-white/10 text-gray-300",
+  enviado: "border-blue-500/50 text-blue-300",
+  semzap: "border-red-500/50 text-red-300",
+  respondeu: "border-green-500/60 text-green-300",
+  naoquer: "border-gray-500/50 text-gray-400",
+};
+
+/**
+ * Onde o usuário marca o lead: Enviado / Sem WhatsApp / Respondeu / Não quer. Marcado, ele não volta nas próximas
+ * buscas. Select nativo: no celular abre a lista do próprio sistema (fácil de tocar); letra de 16px no celular
+ * para o iPhone não dar zoom.
+ */
+function StatusSelect({ lead, status, onStatus, compact }: { lead: Lead; status?: LeadStatus; onStatus: LeadItemProps["onStatus"]; compact?: boolean }) {
+  return (
+    <select
+      aria-label={`Contato com ${lead.name}`}
+      value={status ?? ""}
+      onChange={(e) => onStatus(lead, (e.target.value || null) as LeadStatus | null)}
+      className={`rounded-md border bg-black/40 px-2 ${compact ? "h-7 w-24 text-[10px]" : "h-11 w-full text-base md:text-sm"} ${STATUS_STYLE[status ?? "none"]}`}
+    >
+      <option value="">{compact ? "Contato..." : "Marcar contato..."}</option>
+      {(Object.keys(STATUS_LABEL) as LeadStatus[]).map((s) => (
+        <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+      ))}
+    </select>
+  );
+}
+
+/** Contato confirmado: WhatsApp achado no site/mapa, ou telefone igual em 2 fontes. Esses vêm primeiro na lista. */
+function ConfirmBadge({ lead }: { lead: Lead }) {
+  if (lead.whatsapp) {
+    return (
+      <Badge variant="outline" title="WhatsApp achado no site da empresa ou no mapa" className="bg-green-500/10 text-green-400 border-green-500/30 text-[9px] px-1 uppercase whitespace-nowrap">
+        WhatsApp confirmado
+      </Badge>
+    );
+  }
+  if (lead.phoneCrossChecked) {
+    return (
+      <Badge variant="outline" title="O mesmo número está no cadastro e no mapa (ou no site da empresa)" className="bg-teal-500/10 text-teal-300 border-teal-500/30 text-[9px] px-1 uppercase whitespace-nowrap">
+        Telefone em 2 fontes
+      </Badge>
+    );
+  }
+  return null;
 }
 
 /** Só endereço simples vira link mailto: (o e-mail vem de terceiros; "?" ou "&" poderiam mudar a mensagem). */
@@ -203,13 +257,14 @@ function VerificationDetails({ lead }: { lead: Lead }) {
   );
 }
 
-const LeadCard = memo(function LeadCard({ lead, country, copied, onCopy, onWhatsApp, onEmail, onCall }: LeadItemProps) {
+const LeadCard = memo(function LeadCard({ lead, country, copied, onCopy, onWhatsApp, onEmail, onCall, status, onStatus }: LeadItemProps) {
   const { wpp, wppConfirmed, mail, call, numbers } = contactOf(lead, country);
   return (
     <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-3 relative overflow-hidden">
       {lead.isExpansion && <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>}
       <div>
         <div className="font-medium text-white text-lg flex items-center gap-2">{lead.name}</div>
+        <div className="mt-1"><ConfirmBadge lead={lead} /></div>
         <div className="text-xs text-muted-foreground mt-1">{lead.category}</div>
         <CompanyInfo lead={lead} />
         {lead.staleSince && <div className="mt-1"><StaleBadge lead={lead} /></div>}
@@ -259,11 +314,12 @@ const LeadCard = memo(function LeadCard({ lead, country, copied, onCopy, onWhats
           </Button>
         )}
       </div>
+      <StatusSelect lead={lead} status={status} onStatus={onStatus} />
     </div>
   );
 });
 
-const LeadRow = memo(function LeadRow({ lead, country, copied, onCopy, onWhatsApp, onEmail, onCall }: LeadItemProps) {
+const LeadRow = memo(function LeadRow({ lead, country, copied, onCopy, onWhatsApp, onEmail, onCall, status, onStatus }: LeadItemProps) {
   const { wpp, wppConfirmed, mail, call, numbers } = contactOf(lead, country);
   return (
     <TableRow className={`border-white/10 hover:bg-white/5 transition-colors group ${lead.isExpansion ? "bg-indigo-900/10" : ""}`}>
@@ -276,6 +332,7 @@ const LeadRow = memo(function LeadRow({ lead, country, copied, onCopy, onWhatsAp
             </Badge>
           )}
           <StaleBadge lead={lead} />
+          <ConfirmBadge lead={lead} />
         </div>
         <div className="text-[10px] uppercase font-mono tracking-wider text-muted-foreground mt-1 mb-1">{lead.category}</div>
         <CompanyInfo lead={lead} />
@@ -388,11 +445,35 @@ const LeadRow = memo(function LeadRow({ lead, country, copied, onCopy, onWhatsAp
               <Phone className="w-3 h-3 ml-1" />
             </Button>
           )}
+          <StatusSelect lead={lead} status={status} onStatus={onStatus} compact />
         </div>
       </TableCell>
     </TableRow>
   );
 });
+
+/**
+ * Abriu a mensagem (WhatsApp ou e-mail): marca "Enviado" sozinho, se ainda não tinha marca. Se o WhatsApp disser que
+ * o número não existe, o usuário troca para "Sem WhatsApp".
+ */
+function markSent(lead: Lead) {
+  if (!getMarks()[markKeyOf(lead)]) setMark(lead, "enviado");
+}
+
+/** Resumo do que o usuário já marcou: quantas mensagens, quantos responderam e quantos números sem WhatsApp. */
+function MarksSummaryLine({ summary }: { summary: ReturnType<typeof summarizeMarks> }) {
+  if (summary.total === 0) return null;
+  return (
+    <p className="font-mono text-xs text-muted-foreground mt-2">
+      Seus contatos: <span className="text-blue-300">{summary.enviados} {summary.enviados === 1 ? "enviado" : "enviados"}</span>
+      {" · "}<span className="text-green-300">{summary.responderam} {summary.responderam === 1 ? "respondeu" : "responderam"}</span>
+      {" · "}<span className="text-gray-400">{summary.naoQuer} {summary.naoQuer === 1 ? "não quer" : "não querem"}</span>
+      {summary.taxa !== null && <>{" · "}<span className="text-white">{summary.taxa}% de resposta</span></>}
+      {" · "}<span className="text-red-300">{summary.semZap} sem WhatsApp</span>
+      {". Os marcados não aparecem nas próximas buscas."}
+    </p>
+  );
+}
 
 export default function Home() {
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -411,6 +492,9 @@ export default function Home() {
   const copiedTimerRef = useRef<number | null>(null);
 
   const isDesktop = useIsDesktop();
+  // Leads que o usuário já marcou (Enviado, Sem WhatsApp...). Ficam no aparelho.
+  const marks = useSyncExternalStore(subscribeMarks, getMarks, getServerMarks);
+  const summary = summarizeMarks(marks);
 
   // Filtros
   const [category, setCategory] = useState("");
@@ -517,6 +601,9 @@ export default function Home() {
     params.append("country", country);
     if (noSite) params.append("noSite", "true");
     if (insecure) params.append("insecure", "true");
+    // Quem já foi marcado (enviado, sem WhatsApp...) não volta: o servidor completa a meta com outras empresas.
+    const skip = encodeSkipParam(markedNumbers(getMarks()));
+    if (skip) params.append("pular", skip);
 
     const sse = new EventSource(`/api/search-leads?${params.toString()}`);
     eventSourceRef.current = sse;
@@ -580,9 +667,12 @@ export default function Home() {
     showToast((await copyToClipboard(all)) ? `${t.copyAll} OK!` : "Não foi possível copiar.");
   };
 
+  const handleStatus = useCallback((lead: Lead, status: LeadStatus | null) => setMark(lead, status), []);
+
   const handleOpenWhatsApp = useCallback((lead: Lead) => {
     const number = contactOf(lead, searched.country).wpp;
     if (!number) return;
+    markSent(lead);
     window.open(`https://wa.me/${internationalNumber(number, searched.country)}?text=${encodeURIComponent(pitchFor(lead))}`, "_blank", "noopener,noreferrer");
   }, [searched, pitchFor]);
 
@@ -590,6 +680,7 @@ export default function Home() {
   const handleEmail = useCallback((lead: Lead) => {
     const address = contactOf(lead, searched.country).mail;
     if (!address) return;
+    markSent(lead);
     const lang = pitchLangFor(searched.country);
     const subject = encodeURIComponent(buildEmailSubject(lead, lang));
     const body = encodeURIComponent(buildEmailBody(lead, lang, cityOf(lead)));
@@ -608,7 +699,7 @@ export default function Home() {
       "Nome", "Segmento", "Origem (Expansão)", "DDD", "Telefone (Fixo/WPP)", "Tipo Tel", "WhatsApp",
       "E-mail do site (domínio recebe e-mails)", "Endereço Completo", "Cidade (do endereço)", "Status do Site", "URL",
       "Avaliação Google", "Score", "Verificação", "Checagens", "WhatsApp confirmado", "Outros telefones",
-      "Cadastro sem atualização desde", "CNPJ", "Aberta em",
+      "Cadastro sem atualização desde", "CNPJ", "Aberta em", "Telefone em 2 fontes", "Contato (sua marcação)",
     ];
 
     const rows = leads.map((l) => {
@@ -626,7 +717,8 @@ export default function Home() {
         l.rating > 0 ? l.rating : "", l.score, l.verified ? "VERIFICADO" : "PARCIAL",
         (l.checks ?? []).map((c) => `${c.ok ? "OK" : c.info ? "INFO" : "PENDENTE"}: ${c.detail}`).join(" | "),
         l.whatsapp ? "Sim" : "Não", (l.otherPhones ?? []).join(" / "), l.staleSince ?? "",
-        l.cnpj ? formatCnpj(l.cnpj) : "", l.openedOn ?? "",
+        l.cnpj ? formatCnpj(l.cnpj) : "", l.openedOn ?? "", l.phoneCrossChecked ? "Sim" : "Não",
+        STATUS_LABEL[marks[markKeyOf(l)]?.s as LeadStatus] ?? "",
       ].map(csvCell).join(";");
     });
 
@@ -811,7 +903,8 @@ export default function Home() {
                     {t.results}
                     {loading && <span className="flex h-3 w-3 relative"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span></span>}
                   </CardTitle>
-                  <CardDescription className="font-mono text-xs">{leads.length}{loading ? `/${target}` : ""} leads qualificados, ordenados pela nota (maior = mais fácil de vender). {statusMessage}</CardDescription>
+                  <CardDescription className="font-mono text-xs">{leads.length}{loading ? `/${target}` : ""} leads qualificados: primeiro os de contato confirmado, depois pela nota (maior = mais fácil de vender). {statusMessage}</CardDescription>
+                  <MarksSummaryLine summary={summary} />
                 </div>
                 <div className="flex flex-wrap gap-2 w-full md:w-auto">
                   <Button variant="outline" size="sm" className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white h-11 md:h-7" onClick={handleCopyAllMessages}>
@@ -839,7 +932,7 @@ export default function Home() {
                       <div className="text-center py-12 text-muted-foreground font-mono text-sm">Nenhuma oportunidade encontrada.</div>
                     ) : (
                       leads.map((lead) => (
-                        <LeadCard key={lead.id} lead={lead} country={searched.country} copied={copiedId === lead.id} onCopy={handleCopyMessage} onWhatsApp={handleOpenWhatsApp} onEmail={handleEmail} onCall={handleCall} />
+                        <LeadCard key={lead.id} lead={lead} country={searched.country} copied={copiedId === lead.id} onCopy={handleCopyMessage} onWhatsApp={handleOpenWhatsApp} onEmail={handleEmail} onCall={handleCall} status={marks[markKeyOf(lead)]?.s} onStatus={handleStatus} />
                       ))
                     )}
                   </div>
@@ -868,7 +961,7 @@ export default function Home() {
                             </TableRow>
                           ) : (
                             leads.map((lead) => (
-                              <LeadRow key={lead.id} lead={lead} country={searched.country} copied={copiedId === lead.id} onCopy={handleCopyMessage} onWhatsApp={handleOpenWhatsApp} onEmail={handleEmail} onCall={handleCall} />
+                              <LeadRow key={lead.id} lead={lead} country={searched.country} copied={copiedId === lead.id} onCopy={handleCopyMessage} onWhatsApp={handleOpenWhatsApp} onEmail={handleEmail} onCall={handleCall} status={marks[markKeyOf(lead)]?.s} onStatus={handleStatus} />
                             ))
                           )}
                         </TableBody>
