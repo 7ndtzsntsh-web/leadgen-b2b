@@ -72,6 +72,8 @@ const SPLIT_DIR = join(SRC, `por-uf-${createHash("sha1").update([...TARGET].sort
 const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 const slug = (s) => norm(s).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const nameKey = (s) => norm(s).replace(/[^a-z0-9]/g, "");
+/** Nome fantasia de verdade: a Receita tem "****", "." e "-" no lugar do nome (mesma regra de hasRealName). */
+const realName = (s) => /[a-z]/.test(norm(s)) && nameKey(s).length >= 2;
 
 // Nomes vêm em MAIÚSCULAS: "PADARIA DO JOAO" -> "Padaria do Joao".
 const SMALL = new Set(["de", "da", "do", "das", "dos", "e", "em", "a", "o", "as", "os", "com", "para", "por"]);
@@ -378,7 +380,7 @@ async function processUf(uf) {
   let phoneOnMap = 0;
   let whatsappOnMap = 0;
   for await (const f of ufRows(uf)) {
-    if (!f[T.fantasia]) continue;
+    if (!f[T.fantasia] || !realName(f[T.fantasia])) continue;
     const phones = phonesOf(f);
     const okPhones = phones.filter((p) => phoneOwners.count(phoneKey(p)) < SHARED);
     accountantPhones += phones.length - okPhones.length;

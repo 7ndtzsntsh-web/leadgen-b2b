@@ -104,8 +104,18 @@ export async function loadCompanies(origin: string, uf: string, city: string, fi
   return failed && found.length === 0 ? null : found;
 }
 
+/**
+ * Nome fantasia de verdade. A Receita tem "****", "." e "-" no lugar do nome (275 empresas só em SC): a mensagem
+ * saía "É da ****?". O gerador já tira esses (scripts/cnpj/build.mjs); aqui vale para os dados gerados antes.
+ */
+export function hasRealName(name: string): boolean {
+  const n = normalizeText(name);
+  return /[a-z]/.test(n) && n.replace(/[^a-z0-9]/g, "").length >= 2;
+}
+
 function companiesFor(all: CnpjCompany[], filter: NicheFilter): CnpjCompany[] {
   return all.filter((c) => {
+    if (!hasRealName(c.name)) return false;
     if (filter.cnaes && !filter.cnaes.has(c.cnae)) return false;
     if (!filter.nameParts) return true;
     const name = normalizeText(c.name);

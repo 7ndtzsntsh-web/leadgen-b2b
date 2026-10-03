@@ -15,10 +15,15 @@ import {
   whatsappOf, type Lead,
 } from "@/lib/leadRules";
 import {
-  STATUS_LABEL, getMarks, getServerMarks, markKeyOf, markedNumbers, setMark, subscribeMarks, summarizeMarks, type LeadStatus,
+  REMIND_AFTER_DAYS, STATUS_LABEL, dueReminders, getMarks, getServerMarks, markKeyOf, markedNumbers, setMark, setMarkStatus,
+  setReminded, subscribeMarks, summarizeMarks, type LeadStatus, type MarksSummary, type Reminder,
 } from "@/lib/leadStatus";
+import { getServerStyle, getStyle, setStyle, subscribeStyle } from "@/lib/messageStyle";
+import { BEST_NICHES, weakNicheShare } from "@/lib/nicheAdvice";
 import { semanticDictionary, uiTranslations } from "@/lib/semanticDictionary";
-import { buildEmailBody, buildEmailSubject, buildPitch, pitchLangFor } from "@/lib/pitches";
+import {
+  PITCH_STYLES, buildCopyText, buildEmailBody, buildEmailSubject, buildFirstMessage, buildFollowUp, pitchLangFor, type PitchStyle,
+} from "@/lib/pitches";
 
 const DESKTOP_QUERY = "(min-width: 768px)";
 const FLUSH_INTERVAL_MS = 300;
@@ -35,6 +40,13 @@ function useIsDesktop(): boolean {
     () => false
   );
 }
+
+/** Hora atual, arredondada no minuto (para os lembretes de "há 2 dias"). No servidor é 0: nenhum lembrete. */
+const subscribeMinute = (onChange: () => void) => {
+  const id = window.setInterval(onChange, 60_000);
+  return () => window.clearInterval(id);
+};
+const useNow = () => useSyncExternalStore(subscribeMinute, () => Math.floor(Date.now() / 60_000) * 60_000, () => 0);
 
 async function copyToClipboard(text: string): Promise<boolean> {
   try {
@@ -97,6 +109,8 @@ interface LeadItemProps {
   /** Como o usuário marcou este lead (fica no aparelho). */
   status?: LeadStatus;
   onStatus: (lead: Lead, status: LeadStatus | null) => void;
+  /** Estilo "Só abrir conversa": o WhatsApp abre com "É da X?" e o Copiar copia a proposta, para depois. */
+  proposal: boolean;
 }
 
 const STATUS_STYLE: Record<LeadStatus | "none", string> = {
@@ -257,7 +271,7 @@ function VerificationDetails({ lead }: { lead: Lead }) {
   );
 }
 
-const LeadCard = memo(function LeadCard({ lead, country, copied, onCopy, onWhatsApp, onEmail, onCall, status, onStatus }: LeadItemProps) {
+const LeadCard = memo(function LeadCard({ lead, country, copied, onCopy, onWhatsApp, onEmail, onCall, status, onStatus, proposal }: LeadItemProps) {
   const { wpp, wppConfirmed, mail, call, numbers } = contactOf(lead, country);
   return (
     <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-3 relative overflow-hidden">
@@ -296,7 +310,7 @@ const LeadCard = memo(function LeadCard({ lead, country, copied, onCopy, onWhats
 
       <div className="grid grid-cols-2 gap-2 mt-1">
         <Button variant="outline" className="bg-white/5 border-white/10 text-xs h-11" onClick={() => onCopy(lead)}>
-          {copied ? <Check className="w-3 h-3 mr-1" /> : <Copy className="w-3 h-3 mr-1" />} {copied ? "Copiado" : "Copiar"}
+          {copied ? <Check className="w-3 h-3 mr-1" /> : <Copy className="w-3 h-3 mr-1" />} {copied ? "Copiado" : proposal ? "Copiar proposta" : "Copiar"}
         </Button>
         {wpp && (
           <Button variant="default" className="bg-[#25D366]/20 text-[#25D366] border-[#25D366]/50 text-xs h-11" onClick={() => onWhatsApp(lead)}>
@@ -319,7 +333,7 @@ const LeadCard = memo(function LeadCard({ lead, country, copied, onCopy, onWhats
   );
 });
 
-const LeadRow = memo(function LeadRow({ lead, country, copied, onCopy, onWhatsApp, onEmail, onCall, status, onStatus }: LeadItemProps) {
+const LeadRow = memo(function LeadRow({ lead, country, copied, onCopy, onWhatsApp, onEmail, onCall, status, onStatus, proposal }: LeadItemProps) {
   const { wpp, wppConfirmed, mail, call, numbers } = contactOf(lead, country);
   return (
     <TableRow className={`border-white/10 hover:bg-white/5 transition-colors group ${lead.isExpansion ? "bg-indigo-900/10" : ""}`}>
@@ -411,7 +425,7 @@ const LeadRow = memo(function LeadRow({ lead, country, copied, onCopy, onWhatsAp
             className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white transition-all text-[10px] h-7 w-24 flex justify-between"
             onClick={() => onCopy(lead)}
           >
-            {copied ? "Copiado!" : "Copiar Pitch"}
+            {copied ? "Copiado!" : proposal ? "Proposta" : "Copiar Pitch"}
             {copied ? <Check className="w-3 h-3 ml-1" /> : <Copy className="w-3 h-3 ml-1" />}
           </Button>
 
@@ -456,22 +470,100 @@ const LeadRow = memo(function LeadRow({ lead, country, copied, onCopy, onWhatsAp
  * Abriu a mensagem (WhatsApp ou e-mail): marca "Enviado" sozinho, se ainda não tinha marca. Se o WhatsApp disser que
  * o número não existe, o usuário troca para "Sem WhatsApp".
  */
-function markSent(lead: Lead) {
-  if (!getMarks()[markKeyOf(lead)]) setMark(lead, "enviado");
+function markSent(lead: Lead, extra: { w?: string; m?: PitchStyle }) {
+  if (!getMarks()[markKeyOf(lead)]) setMark(lead, "enviado", extra);
 }
 
 /** Resumo do que o usuário já marcou: quantas mensagens, quantos responderam e quantos números sem WhatsApp. */
-function MarksSummaryLine({ summary }: { summary: ReturnType<typeof summarizeMarks> }) {
+function MarksSummaryLine({ summary }: { summary: MarksSummary }) {
   if (summary.total === 0) return null;
+  const styles = (Object.keys(PITCH_STYLES) as PitchStyle[]).filter((s) => summary.porEstilo[s]);
   return (
-    <p className="font-mono text-xs text-muted-foreground mt-2">
-      Seus contatos: <span className="text-blue-300">{summary.enviados} {summary.enviados === 1 ? "enviado" : "enviados"}</span>
-      {" · "}<span className="text-green-300">{summary.responderam} {summary.responderam === 1 ? "respondeu" : "responderam"}</span>
-      {" · "}<span className="text-gray-400">{summary.naoQuer} {summary.naoQuer === 1 ? "não quer" : "não querem"}</span>
-      {summary.taxa !== null && <>{" · "}<span className="text-white">{summary.taxa}% de resposta</span></>}
-      {" · "}<span className="text-red-300">{summary.semZap} sem WhatsApp</span>
-      {". Os marcados não aparecem nas próximas buscas."}
-    </p>
+    <div className="font-mono text-xs text-muted-foreground mt-2 space-y-1">
+      <p>
+        Seus contatos: <span className="text-blue-300">{summary.enviados} {summary.enviados === 1 ? "enviado" : "enviados"}</span>
+        {" · "}<span className="text-green-300">{summary.responderam} {summary.responderam === 1 ? "respondeu" : "responderam"}</span>
+        {" · "}<span className="text-gray-400">{summary.naoQuer} {summary.naoQuer === 1 ? "não quer" : "não querem"}</span>
+        {summary.taxa !== null && <>{" · "}<span className="text-white">{summary.taxa}% de resposta</span></>}
+        {" · "}<span className="text-red-300">{summary.semZap} sem WhatsApp</span>
+        {". Os marcados não aparecem nas próximas buscas."}
+      </p>
+      {styles.length > 0 && (
+        <p>
+          Resposta por mensagem:{" "}
+          {styles.map((s, i) => {
+            const r = summary.porEstilo[s]!;
+            return (
+              <span key={s}>
+                {i > 0 && " · "}
+                <span className="text-white">{PITCH_STYLES[s].split(" (")[0].toLowerCase()}</span> {r.responderam} de {r.enviados} (
+                {Math.round((r.responderam / r.enviados) * 100)}%)
+              </span>
+            );
+          })}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Quem recebeu a mensagem há 2 dias ou mais e não respondeu: um toque abre o WhatsApp com um lembrete curto (muita
+ * resposta só vem no 2º contato). Aparece mesmo antes de buscar, para o dono ver ao abrir o app.
+ */
+function RemindersPanel({ reminders, onRemind }: { reminders: Reminder[]; onRemind: (r: Reminder) => void }) {
+  if (reminders.length === 0) return null;
+  return (
+    <details className="rounded-xl border border-amber-500/30 bg-amber-500/5 text-sm">
+      <summary className="list-none cursor-pointer select-none px-3 py-3 md:py-2 text-amber-300 [&::-webkit-details-marker]:hidden">
+        🔔 {reminders.length} {reminders.length === 1 ? "contato não respondeu" : "contatos não responderam"} em {REMIND_AFTER_DAYS} dias: mandar lembrete
+      </summary>
+      <ul className="divide-y divide-white/10 border-t border-white/10">
+        {reminders.map((r) => (
+          <li key={r.key} className="flex flex-wrap items-center gap-2 px-3 py-2">
+            <div className="flex-1 min-w-[10rem]">
+              <div className="text-white">{r.mark.n}</div>
+              <div className="text-[11px] text-muted-foreground">mensagem enviada há {r.days} dias</div>
+            </div>
+            <Button variant="default" className="bg-[#25D366]/20 text-[#25D366] border-[#25D366]/50 text-xs h-11 md:h-8" onClick={() => onRemind(r)}>
+              <MessageCircle className="w-3 h-3 mr-1" /> Lembrete
+            </Button>
+            <select
+              aria-label={`Contato com ${r.mark.n}`}
+              value={r.mark.s}
+              onChange={(e) => setMarkStatus(r.key, (e.target.value || null) as LeadStatus | null)}
+              className={`rounded-md border bg-black/40 px-2 h-11 md:h-8 text-base md:text-xs ${STATUS_STYLE[r.mark.s]}`}
+            >
+              {(Object.keys(STATUS_LABEL) as LeadStatus[]).map((s) => (
+                <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+              ))}
+            </select>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+/** O que mais aumenta a resposta, em poucas linhas (inclui o roteiro para quem só tem telefone fixo). */
+function SalesTips() {
+  return (
+    <details className="rounded-xl border border-white/10 bg-white/5 text-sm">
+      <summary className="list-none cursor-pointer select-none px-3 py-3 md:py-2 text-gray-300 [&::-webkit-details-marker]:hidden">
+        💡 Como conseguir mais respostas
+      </summary>
+      <ul className="list-disc space-y-2 border-t border-white/10 py-3 pl-8 pr-3 text-gray-300 leading-snug">
+        <li><b className="text-white">Escolha um ramo que compra site</b> (os botões embaixo do nicho). Barbearia, salão e oficina são os ramos em que menos empresas têm site: nos EUA, onde dá para medir, 5 a 7 em cada 10; dentista e clínica, 9 em 10.</li>
+        <li><b className="text-white">Mensagem curta</b>, que termina numa pergunta fácil. A antiga era longa e pedia reunião, o tipo de mensagem que a maioria ignora quando vem de um número desconhecido.</li>
+        <li><b className="text-white">Lembrete em {REMIND_AFTER_DAYS} dias</b> para quem não respondeu (aparece aqui em cima). Muita resposta só vem no 2º contato.</li>
+        <li><b className="text-white">Vá aos poucos</b> (umas 20 a 30 mensagens novas por dia). Se muita gente bloquear ou denunciar, o WhatsApp restringe a sua conta.</li>
+        <li>
+          <b className="text-white">Lead com FIXO: ligue</b> em horário comercial. Roteiro: &quot;Bom dia! Falo com o responsável pela [empresa]? Eu faço
+          sites e vi que vocês ainda não têm um. Posso te mandar uns exemplos pelo WhatsApp? Qual é o melhor número?&quot;
+        </li>
+        <li>Marque <b className="text-white">Respondeu</b> ou <b className="text-white">Não quer</b> em cada lead: aqui em cima aparece quanto cada mensagem dá de resposta.</li>
+      </ul>
+    </details>
   );
 }
 
@@ -495,14 +587,20 @@ export default function Home() {
   // Leads que o usuário já marcou (Enviado, Sem WhatsApp...). Ficam no aparelho.
   const marks = useSyncExternalStore(subscribeMarks, getMarks, getServerMarks);
   const summary = summarizeMarks(marks);
+  const now = useNow();
+  const reminders = dueReminders(marks, now);
+  // Estilo da mensagem do WhatsApp (curta / só abrir conversa / completa). Fica no aparelho.
+  const style = useSyncExternalStore(subscribeStyle, getStyle, getServerStyle);
 
   // Filtros
   const [category, setCategory] = useState("");
   const [city, setCity] = useState("");
   const [volume, setVolume] = useState("50");
   const [country, setCountry] = useState("br");
-  // País e cidade da última busca: os botões dos leads usam estes (trocar o país na tela depois não muda o DDI).
-  const [searched, setSearched] = useState({ country: "br", city: "" });
+  // País, cidade e nicho da última busca: os botões dos leads usam estes (trocar o país na tela depois não muda o
+  // DDI). O nicho vai na mensagem ("quem procura dentista em Brusque").
+  const [searched, setSearched] = useState({ country: "br", city: "", niche: "" });
+  const weakShare = weakNicheShare(category);
   const [noSite, setNoSite] = useState(false);
   const [insecure, setInsecure] = useState(false);
 
@@ -590,7 +688,7 @@ export default function Home() {
     setLeads([]);
     setLoading(true);
     setHasSearched(true);
-    setSearched({ country, city });
+    setSearched({ country, city, niche: category.trim() });
     setStatusMessage("Conectando...");
     if (!isDesktop) resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
@@ -641,17 +739,30 @@ export default function Home() {
   };
 
   // A cidade do ENDEREÇO do lead vem primeiro (a busca pode devolver empresas de cidades vizinhas).
+  // Sem cidade conhecida: "" (a mensagem diz "sua região").
   const cityOf = useCallback(
-    (lead: Lead) => lead.city || lead.expansionSource || searched.city.split(" - ")[0].trim() || (searched.country === "us" ? "your area" : "sua região"),
+    (lead: Lead) => lead.city || lead.expansionSource || searched.city.split(" - ")[0].trim(),
     [searched]
   );
+  // A mensagem que o WhatsApp abre e a que o Copiar copia (no estilo "Só abrir conversa", a proposta, para depois).
   const pitchFor = useCallback(
-    (lead: Lead) => buildPitch(lead, pitchLangFor(searched.country), cityOf(lead)),
-    [searched, cityOf]
+    (lead: Lead) => buildFirstMessage(lead, pitchLangFor(searched.country), cityOf(lead), searched.niche, style, new Date()),
+    [searched, cityOf, style]
   );
+  const copyTextFor = useCallback(
+    (lead: Lead) => buildCopyText(lead, pitchLangFor(searched.country), cityOf(lead), searched.niche, style, new Date()),
+    [searched, cityOf, style]
+  );
+  // O que fica guardado na marca: o número do WhatsApp (para o lembrete) e o estilo da mensagem (para a taxa).
+  const markExtra = useCallback((lead: Lead) => {
+    const wpp = contactOf(lead, searched.country).wpp;
+    // Fora do Brasil/Portugal a mensagem é sempre a completa (e nos EUA vai por e-mail, sem lembrete).
+    const m: PitchStyle = pitchLangFor(searched.country) === "pt" ? style : "completa";
+    return { w: wpp ? internationalNumber(wpp, searched.country) : undefined, m };
+  }, [searched, style]);
 
   const handleCopyMessage = useCallback(async (lead: Lead) => {
-    const ok = await copyToClipboard(pitchFor(lead));
+    const ok = await copyToClipboard(copyTextFor(lead));
     if (!ok) {
       showToast("Não foi possível copiar.");
       return;
@@ -659,7 +770,7 @@ export default function Home() {
     setCopiedId(lead.id);
     if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current);
     copiedTimerRef.current = window.setTimeout(() => setCopiedId(null), 1800);
-  }, [pitchFor, showToast]);
+  }, [copyTextFor, showToast]);
 
   const handleCopyAllMessages = async () => {
     if (leads.length === 0) return;
@@ -667,20 +778,27 @@ export default function Home() {
     showToast((await copyToClipboard(all)) ? `${t.copyAll} OK!` : "Não foi possível copiar.");
   };
 
-  const handleStatus = useCallback((lead: Lead, status: LeadStatus | null) => setMark(lead, status), []);
+  const handleStatus = useCallback((lead: Lead, status: LeadStatus | null) => setMark(lead, status, markExtra(lead)), [markExtra]);
 
   const handleOpenWhatsApp = useCallback((lead: Lead) => {
     const number = contactOf(lead, searched.country).wpp;
     if (!number) return;
-    markSent(lead);
+    markSent(lead, markExtra(lead));
     window.open(`https://wa.me/${internationalNumber(number, searched.country)}?text=${encodeURIComponent(pitchFor(lead))}`, "_blank", "noopener,noreferrer");
-  }, [searched, pitchFor]);
+  }, [searched, pitchFor, markExtra]);
+
+  // Lembrete para quem não respondeu: abre o WhatsApp com a mensagem curta e tira o lead da lista de lembretes.
+  const handleRemind = useCallback((r: Reminder) => {
+    if (!r.mark.w || !/^\d{10,15}$/.test(r.mark.w)) return;
+    setReminded(r.key);
+    window.open(`https://wa.me/${r.mark.w}?text=${encodeURIComponent(buildFollowUp(r.mark.n, new Date()))}`, "_blank", "noopener,noreferrer");
+  }, []);
 
   // Abre o app de e-mail já com assunto e texto (nos EUA, no lugar do WhatsApp).
   const handleEmail = useCallback((lead: Lead) => {
     const address = contactOf(lead, searched.country).mail;
     if (!address) return;
-    markSent(lead);
+    markSent(lead, { m: "completa" }); // o e-mail (EUA) é sempre o texto completo
     const lang = pitchLangFor(searched.country);
     const subject = encodeURIComponent(buildEmailSubject(lead, lang));
     const body = encodeURIComponent(buildEmailBody(lead, lang, cityOf(lead)));
@@ -846,6 +964,29 @@ export default function Home() {
                     </div>
                   </div>
 
+                  {/* Ramos que mais compram site: um toque preenche o nicho. */}
+                  <div className="space-y-2">
+                    <div className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Ramos que mais compram site</div>
+                    <div className="flex gap-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible">
+                      {BEST_NICHES.map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => setCategory(n)}
+                          className={`shrink-0 rounded-full border px-3 h-11 md:h-7 text-sm md:text-xs transition-colors ${category === n ? "border-primary bg-primary/20 text-white" : "border-white/15 bg-white/5 text-gray-300 hover:bg-white/10"}`}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                    {weakShare !== undefined && (
+                      <p className="text-xs text-amber-300 leading-snug">
+                        Esse ramo compra pouco site: nos EUA, onde dá para medir, só {weakShare}% das empresas dele têm um (dentistas e
+                        clínicas: 90%). Para mais respostas, teste um dos ramos acima.
+                      </p>
+                    )}
+                  </div>
+
                   <div className="space-y-3 pt-2">
                     <div className="flex flex-col sm:flex-row gap-3 sm:gap-6">
                       <div className="flex items-center space-x-2 min-h-11 md:min-h-0">
@@ -907,6 +1048,18 @@ export default function Home() {
                   <MarksSummaryLine summary={summary} />
                 </div>
                 <div className="flex flex-wrap gap-2 w-full md:w-auto">
+                  {pitchLangFor(hasSearched ? searched.country : country) === "pt" && (
+                    <label className="flex items-center gap-2 w-full md:w-auto text-xs font-mono text-muted-foreground">
+                      Mensagem
+                      <select
+                        value={style}
+                        onChange={(e) => setStyle(e.target.value as PitchStyle)}
+                        className="flex-1 md:flex-none rounded-md border border-white/10 bg-black/40 px-2 h-11 md:h-7 text-base md:text-xs text-white"
+                      >
+                        {(Object.keys(PITCH_STYLES) as PitchStyle[]).map((s) => <option key={s} value={s}>{PITCH_STYLES[s]}</option>)}
+                      </select>
+                    </label>
+                  )}
                   <Button variant="outline" size="sm" className="bg-white/5 border-white/10 hover:bg-white/10 hover:text-white h-11 md:h-7" onClick={handleCopyAllMessages}>
                     <FileText className="w-4 h-4 mr-2" />
                     {t.copyAll}
@@ -917,6 +1070,10 @@ export default function Home() {
                   </Button>
                 </div>
               </CardHeader>
+              <div className="flex flex-col gap-2 border-b border-white/10 px-4 md:px-6 py-3">
+                <RemindersPanel reminders={reminders} onRemind={handleRemind} />
+                <SalesTips />
+              </div>
               {loading && (
                 <div className="h-0.5 bg-white/10">
                   <div className="h-full bg-primary transition-all duration-500" style={{ width: `${Math.min(100, (leads.length / target) * 100)}%` }} />
@@ -932,7 +1089,7 @@ export default function Home() {
                       <div className="text-center py-12 text-muted-foreground font-mono text-sm">Nenhuma oportunidade encontrada.</div>
                     ) : (
                       leads.map((lead) => (
-                        <LeadCard key={lead.id} lead={lead} country={searched.country} copied={copiedId === lead.id} onCopy={handleCopyMessage} onWhatsApp={handleOpenWhatsApp} onEmail={handleEmail} onCall={handleCall} status={marks[markKeyOf(lead)]?.s} onStatus={handleStatus} />
+                        <LeadCard key={lead.id} lead={lead} country={searched.country} copied={copiedId === lead.id} onCopy={handleCopyMessage} onWhatsApp={handleOpenWhatsApp} onEmail={handleEmail} onCall={handleCall} status={marks[markKeyOf(lead)]?.s} onStatus={handleStatus} proposal={style === "conversa" && pitchLangFor(searched.country) === "pt"} />
                       ))
                     )}
                   </div>
@@ -961,7 +1118,7 @@ export default function Home() {
                             </TableRow>
                           ) : (
                             leads.map((lead) => (
-                              <LeadRow key={lead.id} lead={lead} country={searched.country} copied={copiedId === lead.id} onCopy={handleCopyMessage} onWhatsApp={handleOpenWhatsApp} onEmail={handleEmail} onCall={handleCall} status={marks[markKeyOf(lead)]?.s} onStatus={handleStatus} />
+                              <LeadRow key={lead.id} lead={lead} country={searched.country} copied={copiedId === lead.id} onCopy={handleCopyMessage} onWhatsApp={handleOpenWhatsApp} onEmail={handleEmail} onCall={handleCall} status={marks[markKeyOf(lead)]?.s} onStatus={handleStatus} proposal={style === "conversa" && pitchLangFor(searched.country) === "pt"} />
                             ))
                           )}
                         </TableBody>
