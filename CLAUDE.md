@@ -95,6 +95,22 @@ node_modules/.bin/jiti arquivo.ts                   # teste de lógica (não há
   telefone recente primeiro, até 6 anos), misturada de um jeito fixo dentro da faixa (`mixKey`), e o telefone
   confirmado vale +5 na nota.
 
+## Pedidos de site (aba "Pedidos de site", `#pedidos`)
+
+- Pedido do dono em 03/10/2026: "o problema é achar empresas que REALMENTE querem comprar site (ex.: Workana)".
+  Mostra quem está pedindo site agora no **99Freelas** (`/api/pedidos` + `src/lib/siteRequests.ts` + `src/app/SiteRequests.tsx`).
+- Por que só o 99Freelas (conferido em 03/10): lista pública, robots.txt libera /projects, termos não proíbem ler
+  (proíbem trocar contato fora: por isso a proposta é feita LÁ e o texto de "Copiar proposta" não tem telefone, e-mail
+  nem link). **Workana** fica atrás de bloqueio anti-robô (Cloudflare): não ler e não contornar; só link.
+  **GetNinjas**: pedidos só para profissional logado, contato pago: só link. Freelancer.com: 4 pedidos em português
+  com 70-200 propostas. Compras do governo (PNCP): 2 de 750 eram de site (portal da transparência) e a API dá 429.
+- Lê as 5 primeiras páginas da categoria Web (50 projetos), guarda 10 min, nome de robô honesto. ~4 pedidos de site
+  por dia (22 por semana); concorrência alta (16-36 propostas nas primeiras horas, 100+ depois de 1 dia) e nas
+  primeiras 24 h só Premium do 99Freelas manda proposta. Verde = até 12 h e menos de 30 propostas.
+- `requestKind`: o TÍTULO decide e o que vem primeiro nele ("logotipo para loja virtual" não é site; "site e vídeos"
+  é). Conferido nos 273 projetos abertos; se o 99Freelas mudar o HTML, `parseProjectList` para de achar itens:
+  conferir a contagem "entre os N projetos" na tela.
+
 ## Cadastro de CNPJ da Receita Federal (fonte principal no Brasil: 27 estados, 5.571 cidades)
 
 - Dados abertos da Receita em `public/cnpj` (formato em `scripts/cnpj/output.mjs`). Estados ativos: os de
