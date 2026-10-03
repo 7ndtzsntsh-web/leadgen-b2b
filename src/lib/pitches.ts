@@ -174,10 +174,11 @@ function shortBody(lead: PitchLead, city: string, niche: string): string {
   const host = hostOf(lead.website);
   const site = host ? `O site da ${name} (${host})` : `O site da ${name}`;
   switch (reasonFor(lead.siteStatus)) {
+    // "Não encontrei" e não "vocês não têm": é o que a busca sabe de verdade (e se tiver, a pessoa responde).
     case "noSite":
-      return `Vi que a ${name} ainda não tem site, e hoje ${whoSearches(niche, city)} no Google acaba achando quem tem. Eu faço sites para empresas como a de vocês.`;
+      return `Procurei e não encontrei um site da ${name}, e hoje ${whoSearches(niche, city)} no Google acaba achando quem tem. Eu faço sites para empresas como a de vocês.`;
     case "socialOnly":
-      return `Vi que a ${name} divulga pelas redes sociais, mas ainda não tem um site próprio, e ${whoSearches(niche, city)} no Google acaba achando quem tem. Eu faço sites para empresas como a de vocês.`;
+      return `Vi que a ${name} divulga pelas redes sociais, mas não encontrei um site próprio de vocês, e ${whoSearches(niche, city)} no Google acaba achando quem tem. Eu faço sites para empresas como a de vocês.`;
     case "down":
       return `${site} não está abrindo, e quem procura vocês no Google e não consegue entrar acaba indo para outro lugar. Eu faço sites e posso deixar o de vocês no ar de novo.`;
     case "insecure":

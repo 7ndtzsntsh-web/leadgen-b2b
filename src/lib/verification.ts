@@ -53,6 +53,8 @@ export interface VerificationInput {
   siteFoundVia?: "email" | "nome";
   /** Endereços testados sem sucesso na busca pelo nome; ausente quando a busca não foi feita. */
   siteSearched?: string[];
+  /** A procura do site não pôde ser feita (DNS sem resposta): "Sem Site" não está confirmado. */
+  siteUnchecked?: boolean;
   /** A fonte informou que a empresa está em funcionamento (status do Google = OPERATIONAL). */
   activeConfirmed: boolean;
   /** CNPJ com situação ATIVA na Receita Federal. */
@@ -215,7 +217,9 @@ export function buildChecks(input: VerificationInput): LeadCheck[] {
     checks.push({ key: "email", ok: false, detail: "Não foi possível checar o domínio do e-mail agora" });
   }
 
-  checks.push({ key: "site", ok: true, detail: siteDetail(input) });
+  checks.push(input.siteUnchecked && input.siteStatus === "Sem Site"
+    ? { key: "site", ok: false, detail: "Não deu para procurar o site agora (o DNS não respondeu): a empresa pode ter site. Busque de novo daqui a pouco" }
+    : { key: "site", ok: true, detail: siteDetail(input) });
   checks.push(activityCheck(input, now));
 
   if (input.address) {

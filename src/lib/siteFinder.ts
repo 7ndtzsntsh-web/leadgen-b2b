@@ -27,7 +27,7 @@ const TLDS: Record<string, string[]> = { br: [".com.br", ".com"], pt: [".pt", ".
 const CITY_NICKNAMES: Record<string, string[]> = { florianopolis: ["floripa"], "sao paulo": ["sampa"] };
 
 const MAX_CACHE = 1000;
-const cache = new Map<string, Promise<string | undefined>>();
+const cache = new Map<string, Promise<string | undefined | null>>();
 
 export interface SiteClues {
   /** Telefones da empresa (qualquer formato). */
@@ -93,36 +93,44 @@ export function pageBelongsTo(html: string, { distinctive, composite }: { distin
   return [city, ...(CITY_NICKNAMES[city] ?? [])].some((form) => text.includes(` ${form} `));
 }
 
-/** O domínio existe (tem endereço IP), por DNS-sobre-HTTPS. */
-async function resolves(host: string): Promise<boolean> {
-  for (const endpoint of DOH_ENDPOINTS) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), DOH_TIMEOUT_MS);
-    try {
-      const res = await fetch(`${endpoint}?name=${encodeURIComponent(host)}&type=A`, {
-        headers: { accept: "application/dns-json" },
-        signal: controller.signal,
-      });
-      if (!res.ok) continue;
-      const data = (await res.json()) as { Status: number; Answer?: { type: number }[] };
-      if (data.Status === 3) return false; // não existe
-      if (data.Status !== 0) continue;
-      return (data.Answer ?? []).some((a) => a.type === 1 || a.type === 5);
-    } catch {
-      /* tenta o próximo resolvedor */
-    } finally {
-      clearTimeout(timer);
+/**
+ * O domínio existe (tem endereço IP), por DNS-sobre-HTTPS. `undefined` = não deu para saber: os dois resolvedores
+ * falharam, mesmo tentando de novo. Antes isso valia "não existe", e a empresa com site saía "Sem Site" (com várias
+ * buscas ao mesmo tempo os resolvedores recusam consultas).
+ */
+async function resolves(host: string): Promise<boolean | undefined> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 400 + Math.random() * 600));
+    for (const endpoint of DOH_ENDPOINTS) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), DOH_TIMEOUT_MS);
+      try {
+        const res = await fetch(`${endpoint}?name=${encodeURIComponent(host)}&type=A`, {
+          headers: { accept: "application/dns-json" },
+          signal: controller.signal,
+        });
+        if (!res.ok) continue;
+        const data = (await res.json()) as { Status: number; Answer?: { type: number }[] };
+        if (data.Status === 3) return false; // não existe
+        if (data.Status !== 0) continue;
+        return (data.Answer ?? []).some((a) => a.type === 1 || a.type === 5);
+      } catch {
+        /* tenta o próximo resolvedor */
+      } finally {
+        clearTimeout(timer);
+      }
     }
   }
-  return false;
+  return undefined;
 }
 
-async function search(name: string, clues: SiteClues): Promise<string | undefined> {
+/** `null` = não deu para procurar (DNS sem resposta): não é o mesmo que "não tem site". */
+async function search(name: string, clues: SiteClues): Promise<string | undefined | null> {
   const { candidates, distinctive } = candidateDomains(name, clues.country);
   // DNS de todos ao mesmo tempo: a maioria dos endereços nem existe, e só os que existem são abertos.
-  const existing = await Promise.all(candidates.map(async (c) => (isPublicHost(c.host) && (await resolves(c.host)) ? c : null)));
-  for (const candidate of existing) {
-    if (!candidate) continue;
+  const dns = await Promise.all(candidates.map((c) => (isPublicHost(c.host) ? resolves(c.host) : false)));
+  for (const [i, candidate] of candidates.entries()) {
+    if (dns[i] !== true) continue;
     const { host, composite } = candidate;
     const page = (await probe(`https://${host}`)) ?? (await probe(`http://${host}`));
     if (!page || page.status >= 400 || !page.html) continue;
@@ -130,7 +138,7 @@ async function search(name: string, clues: SiteClues): Promise<string | undefine
     if (!finalHost || isSocialHost(finalHost) || isParkedPage(page.html)) continue;
     if (pageBelongsTo(page.html, { distinctive, composite }, clues)) return page.finalUrl.startsWith("https://") ? `https://${host}` : `http://${host}`;
   }
-  return undefined;
+  return dns.includes(undefined) ? null : undefined;
 }
 
 // Provedores de e-mail gratuitos: o domínio não é da empresa.
@@ -150,15 +158,18 @@ const FREE_MAIL = new Set([
  * - Site quebrado ou domínio estacionado: devolve o endereço mesmo assim (vira "fora do ar", ótimo argumento de
  *   venda), mas só se o próprio domínio tiver uma palavra do nome — "caroline@ducont.com.br" é do contador.
  */
-export async function siteFromEmail(email: string, name: string, clues: SiteClues): Promise<string | undefined> {
+export async function siteFromEmail(email: string, name: string, clues: SiteClues): Promise<string | undefined | null> {
   const domain = email.split("@")[1]?.toLowerCase().replace(/\.$/, "");
   if (!domain || FREE_MAIL.has(domain) || !isPublicHost(domain)) return undefined;
   const words = candidateDomains(name, clues.country).distinctive.filter((w) => w.length >= 4);
   const domainIsTheirs = words.some((w) => domain.replace(/[^a-z0-9]/g, "").includes(w));
 
   let resolved = false;
+  let unknown = false;
   for (const host of [domain, `www.${domain}`]) {
-    if (!(await resolves(host))) continue;
+    const exists = await resolves(host);
+    if (exists === undefined) unknown = true;
+    if (!exists) continue;
     resolved = true;
     const page = (await probe(`https://${host}`)) ?? (await probe(`http://${host}`));
     if (!page || page.status >= 400 || !page.html) continue;
@@ -174,16 +185,21 @@ export async function siteFromEmail(email: string, name: string, clues: SiteClue
     if (nameHit || phoneHit) return page.finalUrl.startsWith("https://") ? `https://${host}` : `http://${host}`;
     return undefined; // site no ar, mas de outra empresa
   }
-  return resolved && domainIsTheirs ? `https://${domain}` : undefined;
+  if (resolved && domainIsTheirs) return `https://${domain}`;
+  return unknown && !resolved ? null : undefined; // null: o DNS não respondeu, não dá para dizer que não tem site
 }
 
-/** Site próprio da empresa, ou undefined se não houver um que dê para confirmar. */
-export function findOwnWebsite(name: string, clues: SiteClues): Promise<string | undefined> {
+/**
+ * Site próprio da empresa; undefined se não houver um que dê para confirmar; null se não deu para procurar (DNS sem
+ * resposta). A falha não fica guardada: senão as próximas buscas também diriam "sem site" para essa empresa.
+ */
+export function findOwnWebsite(name: string, clues: SiteClues): Promise<string | undefined | null> {
   const key = `${normalizeText(name)}|${normalizeText(clues.city ?? "")}|${clues.country}`;
   const cached = cache.get(key);
   if (cached) return cached;
-  const pending = search(name, clues).catch(() => undefined);
+  const pending = search(name, clues).catch(() => null);
   if (cache.size >= MAX_CACHE) cache.delete(cache.keys().next().value as string);
   cache.set(key, pending);
+  pending.then((site) => { if (site === null) cache.delete(key); });
   return pending;
 }

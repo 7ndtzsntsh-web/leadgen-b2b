@@ -48,6 +48,10 @@ node_modules/.bin/jiti arquivo.ts                   # teste de lógica (não há
 - WhatsApp do site: vale o mais repetido; o que vem depois de "desenvolvido por" é da agência e é ignorado.
 - Busca de site pelo nome (`siteFinder`): exige nome + telefone, ou nome composto + cidade. Não afrouxar:
   num teste, 78 de 96 nomes batiam com domínio de OUTRA empresa.
+- DNS sem resposta (os resolvedores recusam quando há várias buscas ao mesmo tempo) NÃO é "não tem site": `resolves`
+  tenta de novo e devolve `undefined`; a procura devolve `null`, que não fica no cache, e o lead sai PARCIAL ("Não deu
+  para procurar o site agora"). Antes a falha virava "Sem Site" e ficava guardada para as buscas seguintes. Por isso
+  a mensagem diz "não encontrei um site", nunca "vocês não têm site".
 - Cadastro sem atualização há 8+ anos e sem site no ar: descartado. Há 5+ anos: aparece com "Dados de AAAA".
 - Toda frase de checagem tem que ser verdadeira: "confirmado" só quando houve confirmação de verdade.
 - Checagem `info: true` (ex.: WhatsApp de celular, que não dá para confirmar de graça) aparece em cinza e não

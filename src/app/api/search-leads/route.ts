@@ -228,16 +228,22 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
   let siteFound: string | undefined;
   let siteFoundVia: 'email' | 'nome' | undefined;
   let siteSearched: string[] | undefined;
+  // O DNS não respondeu na procura do site: não dá para afirmar que a empresa não tem site (o lead fica PARCIAL).
+  let siteUnchecked = false;
   const listedHost = website ? getHostname(website) : undefined;
   if ((!website || (listedHost && isSocialHost(listedHost))) && raw.source !== 'google') {
     const city = addressCheck && 'city' in addressCheck && addressCheck.city ? addressCheck.city : raw.expansionSource;
     const clues = { phones: listedPhones, city, country: ctx.country };
     // Primeiro o domínio do e-mail da empresa (contato@padariaxyz.com.br), depois o nome.
     const fromEmail = raw.email ? await siteFromEmail(raw.email, raw.name, clues) : undefined;
-    siteFound = fromEmail ?? (await findOwnWebsite(raw.name, clues));
+    const byName = fromEmail ? undefined : await findOwnWebsite(raw.name, clues);
+    siteFound = fromEmail ?? byName ?? undefined;
     siteFoundVia = fromEmail ? 'email' : 'nome';
     if (siteFound) website = siteFound;
-    else siteSearched = candidateDomains(raw.name, ctx.country).candidates.map((c) => c.host);
+    else {
+      siteSearched = candidateDomains(raw.name, ctx.country).candidates.map((c) => c.host);
+      siteUnchecked = fromEmail === null || byName === null;
+    }
   }
 
   let siteStatus: SiteStatus = 'Sem Site';
@@ -321,6 +327,7 @@ async function processLead(ctx: MiningContext, raw: RawLead): Promise<void> {
     siteFound,
     siteFoundVia,
     siteSearched,
+    siteUnchecked,
     activeConfirmed: raw.activeConfirmed,
     cnpjActive: raw.source === 'cnpj',
     overtureConfidence: raw.confidence,
