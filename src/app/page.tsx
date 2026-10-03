@@ -21,7 +21,6 @@ import {
 import { getServerStyle, getStyle, setStyle, subscribeStyle } from "@/lib/messageStyle";
 import { BEST_NICHES, weakNicheShare } from "@/lib/nicheAdvice";
 import { semanticDictionary, uiTranslations } from "@/lib/semanticDictionary";
-import { SiteRequestsPanel } from "./SiteRequests";
 import {
   PITCH_STYLES, buildCopyText, buildEmailBody, buildEmailSubject, buildFirstMessage, buildFollowUp, pitchLangFor, type PitchStyle,
 } from "@/lib/pitches";
@@ -48,13 +47,6 @@ const subscribeMinute = (onChange: () => void) => {
   return () => window.clearInterval(id);
 };
 const useNow = () => useSyncExternalStore(subscribeMinute, () => Math.floor(Date.now() / 60_000) * 60_000, () => 0);
-
-/** Modo "Pedidos de site" (#pedidos no endereço: dá para salvar como atalho no celular). */
-const subscribeHash = (onChange: () => void) => {
-  window.addEventListener("hashchange", onChange);
-  return () => window.removeEventListener("hashchange", onChange);
-};
-const useRequestsMode = () => useSyncExternalStore(subscribeHash, () => window.location.hash === "#pedidos", () => false);
 
 async function copyToClipboard(text: string): Promise<boolean> {
   try {
@@ -592,7 +584,6 @@ export default function Home() {
   const copiedTimerRef = useRef<number | null>(null);
 
   const isDesktop = useIsDesktop();
-  const requestsMode = useRequestsMode();
   // Leads que o usuário já marcou (Enviado, Sem WhatsApp...). Ficam no aparelho.
   const marks = useSyncExternalStore(subscribeMarks, getMarks, getServerMarks);
   const summary = summarizeMarks(marks);
@@ -912,25 +903,6 @@ export default function Home() {
             </div>
           </header>
 
-          {/* Duas formas de achar cliente: empresas sem site (Receita/mapa) ou gente pedindo site agora (99Freelas). */}
-          <nav aria-label="Modo" className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-black/40 p-1">
-            {[
-              { href: "#busca", label: "Empresas sem site", active: !requestsMode },
-              { href: "#pedidos", label: "Pedidos de site", active: requestsMode },
-            ].map((m) => (
-              <a
-                key={m.href}
-                href={m.href}
-                aria-current={m.active ? "page" : undefined}
-                className={`flex items-center justify-center rounded-xl h-11 text-sm font-medium transition-colors ${m.active ? "bg-primary text-primary-foreground" : "text-gray-300 hover:bg-white/5"}`}
-              >
-                {m.label}
-              </a>
-            ))}
-          </nav>
-
-          {requestsMode ? <SiteRequestsPanel /> : (
-          <>
           <Card className="bg-black/60 md:bg-black/40 md:backdrop-blur-xl border border-white/20 rounded-3xl shadow-2xl overflow-hidden">
             <CardHeader className="border-b border-white/10 bg-white/5">
               <CardTitle className="font-serif italic font-light text-2xl">Grid Search (Ultra Qualificado)</CardTitle>
@@ -1157,8 +1129,6 @@ export default function Home() {
               </CardContent>
             </Card>
           </div>
-          </>
-          )}
 
         </div>
       </main>
