@@ -71,6 +71,21 @@ node_modules/.bin/jiti arquivo.ts                   # teste de lógica (não há
     (localStorage, não vai para servidor). Abrir o WhatsApp/e-mail marca "Enviado" sozinho. Os números marcados vão na
     busca no parâmetro `pular` (últimos 8 dígitos em base 36, até 1.500 = ~10 KB de URL) e o servidor não traz esses
     leads de volta (completa a meta com outros). O resumo mostra a taxa de resposta.
+- **Abordagem (pedido do dono em 03/10/2026: "mando mensagem pra um monte de gente e ninguém responde; preciso achar
+  clientes que queiram").** A mensagem antiga era longa, pedia reunião e tinha frase falsa ("Desenhei uma estrutura").
+  - Estilos em `src/lib/pitches.ts` (escolha na tela, guardada no aparelho por `messageStyle.ts`): **curta** (padrão:
+    o problema real da empresa + "Posso te mandar uns exemplos?"), **só abrir conversa** ("Boa tarde! É da X?"; o
+    Copiar copia a proposta para depois) e **completa** (a antiga, sem as frases falsas). Fora do Brasil/Portugal é
+    sempre a completa (EUA = e-mail). O texto varia de um lead para outro (`variantOf`) e a saudação segue a hora.
+    Toda frase tem que ser verdadeira: nada de "preparei", "já mapeei", "encontrei no Google" se não aconteceu.
+  - Lembrete: a marca guarda o WhatsApp com DDI (`w`) e o estilo (`m`). "Enviado" há 2+ dias sem resposta aparece em
+    "Lembretes" (um por lead: `r`). Marca antiga não tem número: não vira lembrete.
+  - Taxa de resposta por estilo (`summarizeMarks().porEstilo`; marca antiga conta como completa, a única que existia).
+  - Ramos que mais compram site (`src/lib/nicheAdvice.ts`): botões embaixo do nicho e aviso quando o ramo compra pouco.
+    Medido no Overture dos EUA (% das empresas independentes com site próprio): energia solar 94%, ar condicionado 92%,
+    clínica 91%, dentista/arquitetura/autoescola/veterinária 90% ... salão 65%, barbearia 52% (eram os ramos que o
+    dono testava). No Brasil não dá para medir; em SC os ramos sugeridos têm centenas/milhares de empresas com celular.
+  - Nome fantasia "****", "." ou "-" (275 em SC) fica de fora (`hasRealName`; `realName` no gerador).
 - **Idade da empresa não dá ponto.** Antes a empresa nova ganhava +10 e a Receita vinha "da mais nova para a mais
   velha": a lista virava só empresa recém-aberta. Agora a ordem da Receita é por faixa (`cnpjTier`: celular com
   telefone recente primeiro, até 6 anos), misturada de um jeito fixo dentro da faixa (`mixKey`), e o telefone

@@ -1,4 +1,5 @@
 import { NO_PHONE, lastDigits, type Lead } from "./leadRules";
+import type { PitchStyle } from "./pitches";
 
 /**
  * Marcação dos leads pelo usuário (pedido do dono em 30/09/2026: muitas empresas não tinham WhatsApp ou não
@@ -23,12 +24,21 @@ export interface Mark {
   n: string;
   /** Números do lead (últimos 8 dígitos), para a busca não trazê-lo de novo. */
   f: string[];
+  /** Número do WhatsApp com DDI (só dígitos), para mandar o lembrete. Marcas antigas não têm. */
+  w?: string;
+  /** Estilo da mensagem mandada, para comparar a taxa de resposta. Marcas antigas: a completa (era a única). */
+  m?: PitchStyle;
+  /** Quando o lembrete foi mandado (ms). */
+  r?: number;
 }
 
 export type Marks = Record<string, Mark>;
 
 const STORAGE_KEY = "leadhunter.marcados.v1";
 const EMPTY: Marks = {};
+const DAY_MS = 24 * 3600 * 1000;
+/** Sem resposta depois de tantos dias: hora do lembrete. */
+export const REMIND_AFTER_DAYS = 2;
 
 /** Mesmo lead em buscas diferentes: CNPJ quando há (é o mesmo em todas as fontes), senão o id da fonte. */
 export const markKeyOf = (lead: Pick<Lead, "id" | "cnpj">) => (lead.cnpj ? `cnpj/${lead.cnpj}` : lead.id);
@@ -70,18 +80,7 @@ export function getMarks(): Marks {
 
 export const getServerMarks = (): Marks => EMPTY;
 
-/** Marca (ou desmarca, com `null`) um lead. */
-export function setMark(lead: Pick<Lead, "id" | "cnpj" | "name" | "phone" | "whatsapp" | "otherPhones">, status: LeadStatus | null): void {
-  const key = markKeyOf(lead);
-  const next: Marks = { ...getMarks() };
-  if (status === null) delete next[key];
-  else {
-    const numbers = [lead.phone, lead.whatsapp, ...(lead.otherPhones ?? [])]
-      .filter((p): p is string => !!p && p !== NO_PHONE)
-      .map(lastDigits)
-      .filter((d) => d.length === 8);
-    next[key] = { s: status, t: Date.now(), n: lead.name, f: [...new Set(numbers)] };
-  }
+function save(next: Marks): void {
   snapshot = next;
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
@@ -91,11 +90,80 @@ export function setMark(lead: Pick<Lead, "id" | "cnpj" | "name" | "phone" | "wha
   notify();
 }
 
+/**
+ * Marca (ou desmarca, com `null`) um lead. `extra`: o número do WhatsApp e o estilo da mensagem, quando se sabe
+ * (trocar o status depois mantém os dois e o lembrete já mandado).
+ */
+export function setMark(
+  lead: Pick<Lead, "id" | "cnpj" | "name" | "phone" | "whatsapp" | "otherPhones">,
+  status: LeadStatus | null,
+  extra: { w?: string; m?: PitchStyle } = {},
+): void {
+  const key = markKeyOf(lead);
+  const next: Marks = { ...getMarks() };
+  if (status === null) delete next[key];
+  else {
+    const prev = next[key];
+    const numbers = [lead.phone, lead.whatsapp, ...(lead.otherPhones ?? [])]
+      .filter((p): p is string => !!p && p !== NO_PHONE)
+      .map(lastDigits)
+      .filter((d) => d.length === 8);
+    const mark: Mark = { s: status, t: Date.now(), n: lead.name, f: [...new Set(numbers)] };
+    const w = prev?.w ?? extra.w;
+    const m = prev?.m ?? extra.m;
+    if (w) mark.w = w;
+    if (m) mark.m = m;
+    if (prev?.r) mark.r = prev.r;
+    next[key] = mark;
+  }
+  save(next);
+}
+
+/** O lembrete foi mandado: o lead continua "Enviado", mas sai da lista de lembretes. */
+export function setReminded(key: string): void {
+  const prev = getMarks()[key];
+  if (!prev) return;
+  save({ ...getMarks(), [key]: { ...prev, r: Date.now() } });
+}
+
+/** Troca o status de um lead marcado (na lista de lembretes não há o lead inteiro, só a marca). */
+export function setMarkStatus(key: string, status: LeadStatus | null): void {
+  const prev = getMarks()[key];
+  if (!prev) return;
+  const next: Marks = { ...getMarks() };
+  if (status === null) delete next[key];
+  else next[key] = { ...prev, s: status, t: Date.now() };
+  save(next);
+}
+
 /** Todos os números já marcados (os mais recentes primeiro), para a busca não trazer esses leads de volta. */
 export function markedNumbers(marks: Marks): string[] {
   return Object.values(marks)
     .sort((a, b) => b.t - a.t)
     .flatMap((m) => m.f);
+}
+
+export interface Reminder {
+  key: string;
+  mark: Mark;
+  /** Dias desde o envio. */
+  days: number;
+}
+
+/**
+ * Mandados há 2 dias ou mais, sem resposta e ainda sem lembrete (os mais antigos primeiro). Só os que têm o número
+ * guardado (marcas de antes desta versão não têm).
+ */
+export function dueReminders(marks: Marks, now = Date.now()): Reminder[] {
+  return Object.entries(marks)
+    .filter(([, m]) => m.s === "enviado" && !m.r && m.w && now - m.t >= REMIND_AFTER_DAYS * DAY_MS)
+    .map(([key, mark]) => ({ key, mark, days: Math.floor((now - mark.t) / DAY_MS) }))
+    .sort((a, b) => a.mark.t - b.mark.t);
+}
+
+export interface StyleResult {
+  enviados: number;
+  responderam: number;
 }
 
 export interface MarksSummary {
@@ -106,7 +174,11 @@ export interface MarksSummary {
   naoQuer: number;
   /** % de quem respondeu (inclusive "não quer") entre as mensagens que chegaram (enviado + respondeu + não quer). */
   taxa: number | null;
+  /** Mesma conta por estilo de mensagem (marca antiga = completa, a única que existia). */
+  porEstilo: Partial<Record<PitchStyle, StyleResult>>;
 }
+
+const SENT: LeadStatus[] = ["enviado", "respondeu", "naoquer"];
 
 export function summarizeMarks(marks: Marks): MarksSummary {
   const all = Object.values(marks);
@@ -115,6 +187,13 @@ export function summarizeMarks(marks: Marks): MarksSummary {
   const responderam = count("respondeu");
   const naoQuer = count("naoquer");
   const sent = enviados + responderam + naoQuer;
+  const porEstilo: MarksSummary["porEstilo"] = {};
+  for (const m of all) {
+    if (!SENT.includes(m.s)) continue;
+    const r = (porEstilo[m.m ?? "completa"] ??= { enviados: 0, responderam: 0 });
+    r.enviados++;
+    if (m.s !== "enviado") r.responderam++;
+  }
   return {
     total: all.length,
     enviados: sent,
@@ -122,5 +201,6 @@ export function summarizeMarks(marks: Marks): MarksSummary {
     semZap: count("semzap"),
     naoQuer,
     taxa: sent > 0 ? Math.round(((responderam + naoQuer) / sent) * 100) : null,
+    porEstilo,
   };
 }
